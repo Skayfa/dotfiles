@@ -1,43 +1,50 @@
 # Workflow de dev — challenge → livraison fidèle
 
-Objectif : livrer **clean ET fidèle à ce qui a été vraiment demandé**. On **challenge** la demande avant de coder, et on **vérifie** que chaque critère d'acceptation est couvert avant de livrer.
-Outils : Claude Code + Zed · **sillon** (MCP) · **Notion** (MCP) · skills **`grill`** / **`verify`** · lazygit.
+**Règle en une phrase :** rien ne se code sans **critères d'acceptation** (étape ③), rien ne se livre sans qu'ils soient **tous couverts** (étape ⑥).
 
 ```mermaid
 flowchart TD
-    T(["🆕 Sujet = ticket Notion · Type: bug / feature / amélioration"]) --> INTAKE
+    A(["① Sujet · ticket Notion"]) --> B["② Intake<br/>Plan · Type · Epic · critères"]
+    B --> C["③ Grill<br/>challenge multi-source"]
 
-    INTAKE["📥 Intake<br/>Notion MCP : Plan · Type · Epic · critères<br/>sillon MCP : transcripts · décisions · REX"] --> GRILL
+    S1["transcripts + décisions<br/>(sillon)"] --> C
+    S2["l'epic<br/>(Notion)"] --> C
+    S3["la codebase<br/>(le repo)"] --> C
+    S4["insights clients"] --> C
 
-    GRILL["🔥 grill — challenge multi-source<br/>① transcripts (sillon) ② epic (Notion)<br/>③ LA CODEBASE ④ insights clients<br/>↳ profondeur selon le Type"] --> Q{"Questions<br/>bloquantes ?"}
+    C --> D{"Spec claire &amp;<br/>critères complets ?"}
+    D -->|"non · questions ouvertes"| E["Trancher<br/>décisions → REX (sillon)"]
+    E --> C
+    D -->|"oui"| F["④ Contrat<br/>spec + critères d'acceptation figés"]
 
-    Q -->|"oui"| RESOLVE["❓ Trancher (toi / équipe)<br/>décisions → REX dans sillon"]
-    RESOLVE --> GRILL
-    Q -->|"non"| CONTRAT["📄 Contrat = spec + critères d'acceptation<br/>(Notion Plan / task/plans/ET-XXXX)"]
-
-    CONTRAT --> BUILD["⌨️ Build — Claude Code + Zed<br/>selon AGENTS.md (Comment tester / livrer)"]
-    BUILD --> VERIFY["✅ verify — gate de fidélité<br/>critères → plan de test → tests du projet"]
-    VERIFY --> GATE{"Chaque critère<br/>couvert ?"}
-    GATE -->|"non — il manque X"| BUILD
-    GATE -->|"oui"| SHIP["🚀 MR / PR · review · merge<br/>(GitLab MR · GitHub PR)"]
-    SHIP --> DONE(["✔️ Livré, clean & fidèle au contrat"])
+    F --> G["⑤ Build<br/>coder selon AGENTS.md"]
+    G --> H["⑥ Verify<br/>plan de test → tests → couverture"]
+    H --> I{"Tous les critères<br/>couverts ?"}
+    I -->|"non · il manque X"| G
+    I -->|"oui"| J(["⑦ MR / PR · review · merge"])
 ```
 
-## Les étapes en clair
+## Détail précis par étape
 
-| Étape       | Quoi                                                                                                                                   | Outil                           |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| **Intake**  | Lire le sujet : `Plan`, `Type`, `Epic`, critères · + contexte (transcripts, décisions, REX)                                            | Notion MCP · sillon MCP         |
-| **Grill**   | Challenger la spec contre **4 sources** : transcripts · epic · **codebase** · insights → gaps + **critères d'acceptation** + questions | skill `grill`                   |
-| **Contrat** | Spec + critères validés (le REX vit dans sillon)                                                                                       | Notion `Plan` / `task/plans`    |
-| **Build**   | Coder selon les conventions du repo                                                                                                    | Claude Code + Zed · `AGENTS.md` |
-| **Verify**  | Plan de test depuis les critères → tests projet → **couverture de chaque critère** (sinon on ne livre pas)                             | skill `verify`                  |
-| **Ship**    | MR/PR → review → merge                                                                                                                 | lazygit · GitLab/GitHub         |
+| #   | Étape       | Ce que je fais (précis)                                                                 | Outil                           | Entrée → Sortie                                 |
+| --- | ----------- | --------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------- |
+| ①   | **Sujet**   | Un ticket Notion à traiter (champ `Type` : bug / feature / amélioration)                | Notion                          | —                                               |
+| ②   | **Intake**  | Lire `Plan`, `Type`, `Epic`, critères + le contexte capté                               | Notion MCP · sillon MCP         | ticket → compréhension du besoin                |
+| ③   | **Grill**   | Challenger la spec contre **4 sources** : transcripts · epic · **codebase** · insights  | skill `grill`                   | compréhension → **gaps + critères + questions** |
+| ④   | **Contrat** | Figer la spec + les critères d'acceptation (questions tranchées)                        | Notion `Plan` / `task/plans`    | questions résolues → **contrat testable**       |
+| ⑤   | **Build**   | Coder selon les conventions du repo                                                     | Claude Code + Zed · `AGENTS.md` | contrat → code                                  |
+| ⑥   | **Verify**  | Générer le plan de test depuis les critères → lancer les tests → couvrir chaque critère | skill `verify`                  | code → **matrice de couverture**                |
+| ⑦   | **Ship**    | Ouvrir la MR/PR, review, merge                                                          | lazygit · GitLab / GitHub       | code couvert → mergé                            |
+
+## Profondeur du grill selon le `Type`
+
+| Type             | Grill                                                |
+| ---------------- | ---------------------------------------------------- |
+| **Bug**          | léger : repro + cause racine + « corrigé quand… »    |
+| **Amélioration** | moyen : cadrer « avant → après » + critères du delta |
+| **Feature**      | profond : périmètre, edge cases, critères complets   |
 
 ## Variantes
 
-- **Par type** : `Bug` = grill léger (repro + cause + « corrigé quand… ») · `Amélioration` = moyen (avant → après) · `Feature` = profond (périmètre, edge cases, critères complets).
-- **Perso** : même boucle, mais le « contrat » = ton idée qui se précise, et le **grill est itératif dans le temps**.
-- **En parallèle** : plusieurs sujets en même temps via worktrees **`ccw`** (1 Claude isolé / branche) ou **Agent Teams** (plusieurs coéquipiers, 1 working tree). Voir le README (worktrees `ccw` + Agent Teams).
-
-> Le principe tient en deux gardes : **rien ne se code sans critères d'acceptation** (grill), **rien ne se livre sans qu'ils soient couverts** (verify).
+- **Perso** : même boucle, mais le « contrat » = ton idée qui se précise ; le grill est **itératif dans le temps**.
+- **En parallèle** : plusieurs sujets à la fois via worktrees **`ccw`** (1 Claude isolé / branche) ou **Agent Teams** (plusieurs coéquipiers, 1 working tree) — voir le README.
