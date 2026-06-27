@@ -89,10 +89,6 @@ function M.open()
   -- force le focus dans la fenêtre flottante (sinon q/Échap partent ailleurs)
   vim.api.nvim_set_current_win(win)
   vim.wo[win].cursorline = true
-  -- empêche de changer le buffer de cette fenêtre (ex: Tab/Shift+Tab de NvChad)
-  pcall(function()
-    vim.wo[win].winfixbuf = true
-  end)
 
   local function close()
     if vim.api.nvim_win_is_valid(win) then
