@@ -3,7 +3,7 @@
    ════════════════════════════════════════════════════
 
    ▸ PANES  (les cadres dans une fenêtre)
-       ⌥ h / j / k / l      aller au pane gauche/bas/haut/droite   ← SANS préfixe
+       ⌥ ← / → / ↑ / ↓      aller au pane gauche/droite/haut/bas   ← SANS préfixe
        préfixe  v           split en COLONNES (côte à côte  | )
        préfixe  s           split en LIGNES  (l'un sous l'autre - )
        préfixe  z           ZOOM plein écran le pane / dézoom

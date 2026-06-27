@@ -39,7 +39,7 @@ local lines = {
   "  NAVIGATION DE CODE (LSP)",
   "    gd             aller à la DÉFINITION",
   "    Ctrl+clic / clic droit   aller à la définition (souris)",
-  "    ⌥←  /  ⌥→      retour arrière / avant   (ou Ctrl-o / Ctrl-i)",
+  "    Ctrl-o / Ctrl-i   retour arrière / avant   (⌥←/→ = panes tmux)",
   "    gr  gi  K      références / implémentation / doc au survol",
   "    espace r n     renommer le symbole",
   "    espace c a     actions de code (quick fix)",
