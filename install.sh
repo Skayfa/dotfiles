@@ -45,6 +45,12 @@ install_file "$DOTFILES/tmux/cheatsheet.txt"      "$HOME/.config/tmux/cheatsheet
 install_file "$DOTFILES/hammerspoon/init.lua"     "$HOME/.hammerspoon/init.lua"
 install_file "$DOTFILES/lazygit/config.yml"       "$HOME/Library/Application Support/lazygit/config.yml"
 
+# Claude Code (Agent Teams tmux + statusline) + Starship (prompt)
+install_file "$DOTFILES/claude/settings.json"          "$HOME/.claude/settings.json"
+install_file "$DOTFILES/claude/statusline-command.sh"  "$HOME/.claude/statusline-command.sh"
+chmod +x "$HOME/.claude/statusline-command.sh"
+[ -f "$DOTFILES/starship/starship.toml" ] && install_file "$DOTFILES/starship/starship.toml" "$HOME/.config/starship.toml"
+
 # scripts
 install_file "$DOTFILES/bin/ccw"      "$HOME/.local/bin/ccw"
 install_file "$DOTFILES/bin/zed-open" "$HOME/.local/bin/zed-open"

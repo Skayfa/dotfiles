@@ -25,6 +25,8 @@ Le script installe les dépendances (Brewfile), le CLI `tree-sitter`, puis pose 
 | `hammerspoon/` | `~/.hammerspoon/` | drop-down Alacritty sur `Ctrl+Alt+T` |
 | `bin/` | `~/.local/bin/` | `ccw` (git worktree + tmux + claude), `zed-open` (ouvre un chemin dans Zed) |
 | `zsh/` | sourcé par `~/.zshrc` | alias `vim`→`nvim`, `lg`→`lazygit` |
+| `claude/` | `~/.claude/` | Claude Code : Agent Teams (`teammateMode: tmux`) + statusline custom |
+| `starship/` | `~/.config/` | prompt Starship (que la statusline Claude reprend) |
 
 > Les chemins absolus sont stockés en placeholder `__HOME__` et résolus à l'install → portable quel que soit ton nom d'utilisateur.
 

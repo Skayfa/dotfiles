@@ -22,5 +22,9 @@ brew "tree-sitter"
 # Node (requis par tree-sitter-cli, prettierd, certains LSP)
 brew "node"
 
+# Prompt + GitHub CLI
+brew "starship"
+brew "gh"
+
 # Police avec icônes (pour Powerline tmux + icônes nvim)
 cask "font-jetbrains-mono-nerd-font"
