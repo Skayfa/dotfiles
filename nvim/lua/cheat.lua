@@ -50,6 +50,7 @@ local lines = {
   "    :w  :q  :wq    sauver / quitter / sauver + quitter   (ZZ = wq)",
   "    Ctrl-w v / s   split vertical / horizontal",
   "    Ctrl-w hjkl    aller au split voisin",
+  "    H / L          onglet précédent / suivant (buffer)",
   "",
   "  TES OUTILS (NvChad)",
   "    espace (attendre)   which-key : montre TES raccourcis",

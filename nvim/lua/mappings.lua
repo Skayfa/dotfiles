@@ -29,6 +29,15 @@ map("n", "gT", function()
   require("nvchad.tabufline").prev()
 end, { desc = "Buffer/onglet précédent" })
 
+-- Changement d'onglet INTUITIF : Shift+L (suivant) / Shift+H (précédent)
+-- (remplace les motions H/L haut/bas d'écran, peu utilisées ; gt/gT restent dispo)
+map("n", "L", function()
+  require("nvchad.tabufline").next()
+end, { desc = "Onglet suivant" })
+map("n", "H", function()
+  require("nvchad.tabufline").prev()
+end, { desc = "Onglet précédent" })
+
 -- Aide-mémoire Vim perso : <espace>?  ou  :Cheat
 require "cheat"
 
