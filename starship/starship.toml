@@ -34,10 +34,6 @@ added_style = "fg:#1C3A5E bg:#FCF392"
 deleted_style = "fg:bright-red bg:235"
 disabled = false
 
-[hg_branch]
-format = "[ $symbol$branch ]($style)"
-symbol = " "
-
 [cmd_duration]
 format = "[  $duration ]($style)"
 style = "fg:bright-white bg:18"

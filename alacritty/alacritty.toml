@@ -36,8 +36,11 @@ mouse = { enabled = true, mods = "Command" }
 binding = { key = "O", mods = "Control|Shift" }
 command = "__HOME__/.local/bin/zed-open"
 
-# --- Cmd+b envoie le prefixe tmux (Ctrl-b, octet 0x02) ---
+# --- Bindings clavier ---
 [keyboard]
 bindings = [
+  # Cmd+b -> prefixe tmux (Ctrl-b, 0x02)
   { key = "B", mods = "Command", chars = "\u0002" },
+  # Shift+Entree -> saut de ligne dans Claude Code CLI
+  { key = "Return", mods = "Shift", chars = "\n" },
 ]

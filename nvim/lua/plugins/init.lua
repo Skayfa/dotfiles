@@ -41,6 +41,7 @@ return {
         "gopls", "goimports",
         "typescript-language-server", "prettierd",
         "json-lsp", "yaml-language-server", "marksman",
+        "html-lsp", "css-lsp",
         "buf",
       },
     },
