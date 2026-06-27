@@ -1,49 +1,43 @@
-# Workflow de dev — selon les cas
+# Workflow de dev — challenge → livraison fidèle
 
-Flux de travail avec mon setup (**Alacritty + tmux + nvim/Zed + lazygit + Claude Code**, monorepo **dolmen** Go/React/proto). Le schéma se lit de haut en bas : on entre par une tâche, on choisit le cas, tout converge sur la review → MR.
+Objectif : livrer **clean ET fidèle à ce qui a été vraiment demandé**. On **challenge** la demande avant de coder, et on **vérifie** que chaque critère d'acceptation est couvert avant de livrer.
+Outils : Claude Code + Zed · **sillon** (MCP) · **Notion** (MCP) · skills **`grill`** / **`verify`** · lazygit.
 
 ```mermaid
 flowchart TD
-    T(["🆕 Nouvelle tâche"]) --> SCOPE{"Quel cas ?"}
+    T(["🆕 Sujet = ticket Notion · Type: bug / feature / amélioration"]) --> INTAKE
 
-    %% Cas 1 — modif rapide
-    SCOPE -->|"⚡ Modif rapide / hotfix"| Q1["nvim ou Zed<br/>édition directe"]
-    Q1 --> REV
+    INTAKE["📥 Intake<br/>Notion MCP : Plan · Type · Epic · critères<br/>sillon MCP : transcripts · décisions · REX"] --> GRILL
 
-    %% Cas 2 — feature isolée
-    SCOPE -->|"🌿 Feature isolée"| F1["ccw new feat<br/>worktree + tmux + Claude dédiés"]
-    F1 --> F2["Dev : Claude Code + nvim<br/>LSP · Telescope"]
-    F2 --> REV
+    GRILL["🔥 grill — challenge multi-source<br/>① transcripts (sillon) ② epic (Notion)<br/>③ LA CODEBASE ④ insights clients<br/>↳ profondeur selon le Type"] --> Q{"Questions<br/>bloquantes ?"}
 
-    %% Cas 3 — parallèle
-    SCOPE -->|"🔀 Plusieurs en parallèle"| P1{"Besoin d'isolation ?"}
-    P1 -->|"Oui · branches séparées"| P2["N × ccw worktrees<br/>(1 Claude / worktree)"]
-    P1 -->|"Non · 1 working tree"| P3["Agent Teams (tmux)<br/>plusieurs coéquipiers Claude"]
-    P2 --> REV
-    P3 --> REV
+    Q -->|"oui"| RESOLVE["❓ Trancher (toi / équipe)<br/>décisions → REX dans sillon"]
+    RESOLVE --> GRILL
+    Q -->|"non"| CONTRAT["📄 Contrat = spec + critères d'acceptation<br/>(Notion Plan / task/plans/ET-XXXX)"]
 
-    %% Cas 4 — comprendre
-    SCOPE -->|"🔍 Comprendre / explorer"| E1["Telescope : espace ff / fw<br/>LSP : gd · gr · K<br/>(ou question à Claude)"]
-    E1 --> SCOPE
-
-    %% Convergence
-    REV["lazygit · Ctrl-b g<br/>review · stage par ligne · commit"] --> PUSH["git push"]
-    PUSH --> MR{{"MR GitLab"}}
-    MR --> MERGE{"Mergée ?"}
-    MERGE -->|"oui · si worktree"| CLEAN["ccw rm feat<br/>nettoie branche + worktree + tmux"]
-    MERGE -->|"oui"| DONE(["✅ Fini"])
-    CLEAN --> DONE
+    CONTRAT --> BUILD["⌨️ Build — Claude Code + Zed<br/>selon AGENTS.md (Comment tester / livrer)"]
+    BUILD --> VERIFY["✅ verify — gate de fidélité<br/>critères → plan de test → tests du projet"]
+    VERIFY --> GATE{"Chaque critère<br/>couvert ?"}
+    GATE -->|"non — il manque X"| BUILD
+    GATE -->|"oui"| SHIP["🚀 MR / PR · review · merge<br/>(GitLab MR · GitHub PR)"]
+    SHIP --> DONE(["✔️ Livré, clean & fidèle au contrat"])
 ```
 
-## Les cas en clair
+## Les étapes en clair
 
-| Cas                           | Quand                          | Outils / étapes                                                                                            |
-| ----------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| ⚡ **Modif rapide / hotfix**  | un seul petit changement       | édite (nvim/Zed) → **lazygit** review+commit → push                                                        |
-| 🌿 **Feature isolée**         | une feature dédiée             | `ccw new <feat>` (worktree + tmux + Claude) → dev → review → MR → après merge `ccw rm <feat>`              |
-| 🔀 **Plusieurs en parallèle** | bosser sur 2+ choses à la fois | **branches séparées** → N `ccw` worktrees · **même working tree** → **Agent Teams** (`teammateMode: tmux`) |
-| 🔍 **Comprendre / explorer**  | lire/naviguer le code          | Telescope (`espace ff`/`fw`), LSP (`gd`/`gr`/`K`), ou questions à Claude                                   |
+| Étape       | Quoi                                                                                                                                   | Outil                           |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| **Intake**  | Lire le sujet : `Plan`, `Type`, `Epic`, critères · + contexte (transcripts, décisions, REX)                                            | Notion MCP · sillon MCP         |
+| **Grill**   | Challenger la spec contre **4 sources** : transcripts · epic · **codebase** · insights → gaps + **critères d'acceptation** + questions | skill `grill`                   |
+| **Contrat** | Spec + critères validés (le REX vit dans sillon)                                                                                       | Notion `Plan` / `task/plans`    |
+| **Build**   | Coder selon les conventions du repo                                                                                                    | Claude Code + Zed · `AGENTS.md` |
+| **Verify**  | Plan de test depuis les critères → tests projet → **couverture de chaque critère** (sinon on ne livre pas)                             | skill `verify`                  |
+| **Ship**    | MR/PR → review → merge                                                                                                                 | lazygit · GitLab/GitHub         |
 
-**Convergence commune** : `lazygit` (review + commit) → `git push` → **MR GitLab** → merge → nettoyage du worktree si besoin.
+## Variantes
 
-> Schéma indicatif — adapte-le si tes cas réels diffèrent (je peux le régénérer).
+- **Par type** : `Bug` = grill léger (repro + cause + « corrigé quand… ») · `Amélioration` = moyen (avant → après) · `Feature` = profond (périmètre, edge cases, critères complets).
+- **Perso** : même boucle, mais le « contrat » = ton idée qui se précise, et le **grill est itératif dans le temps**.
+- **En parallèle** : plusieurs sujets en même temps via worktrees **`ccw`** (1 Claude isolé / branche) ou **Agent Teams** (plusieurs coéquipiers, 1 working tree). Voir le README (worktrees `ccw` + Agent Teams).
+
+> Le principe tient en deux gardes : **rien ne se code sans critères d'acceptation** (grill), **rien ne se livre sans qu'ils soient couverts** (verify).
