@@ -1,1 +1,79 @@
+# =============================================================================
+#  SECRETS & IDENTIFIANTS — ne JAMAIS committer (repo public)
+# =============================================================================
+.env
+.env.*
+*.env
+*.local
+*.local.*
+*.secret
+*secret*
+*secrets*
+*credentials*
+*password*
+.netrc
+.npmrc
+.pypirc
+.dockercfg
+.docker/config.json
+
+# Clés / certificats
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+*.gpg
+*.asc
+*.ppk
+
+# Dossiers sensibles (au cas où on en copierait)
+.ssh/
+.gnupg/
+.aws/
+.azure/
+.kube/
+gcloud/
+
+# Claude Code — on ne garde QUE claude/settings.json + statusline ; jamais le reste
+.claude.json
+**/.claude.json
+.credentials.json
+**/.credentials.json
+.claude/projects/
+.claude/sessions/
+.claude/history.jsonl
+.claude/shell-snapshots/
+.claude/todos/
+
+# Historiques shell
+.*_history
+*_history
+
+# =============================================================================
+#  BRUIT / TEMPORAIRE
+# =============================================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+*.swp
+*.swo
+*~
+*.orig
+*.tmp
+
+# Backups créés par install.sh (*.bak.<date>)
+*.bak
+*.bak.*
+
+# Logs & dépendances
+*.log
+node_modules/
