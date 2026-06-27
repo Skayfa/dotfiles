@@ -49,6 +49,10 @@ install_file "$DOTFILES/lazygit/config.yml"       "$HOME/Library/Application Sup
 install_file "$DOTFILES/claude/settings.json"          "$HOME/.claude/settings.json"
 install_file "$DOTFILES/claude/statusline-command.sh"  "$HOME/.claude/statusline-command.sh"
 chmod +x "$HOME/.claude/statusline-command.sh"
+# CLAUDE.md global (importe claude/GLOBAL.md du repo) + skills grill/verify
+install_file "$DOTFILES/claude/CLAUDE.md"              "$HOME/.claude/CLAUDE.md"
+mkdir -p "$HOME/.claude/skills"
+rsync -a "$DOTFILES/claude/skills/" "$HOME/.claude/skills/"
 [ -f "$DOTFILES/starship/starship.toml" ] && install_file "$DOTFILES/starship/starship.toml" "$HOME/.config/starship.toml"
 
 # scripts
