@@ -1,0 +1,19 @@
+#!/bin/sh
+# Ouvre un chemin dans Zed depuis un hint Alacritty.
+# Gère : chemins absolus, ~ (home), et chemins relatifs (résolus via le pane tmux actif).
+# Appelé par Alacritty (GUI) qui n'a pas le PATH du shell -> binaires en chemin absolu.
+TMUX_BIN=/opt/homebrew/bin/tmux
+ZED_BIN=/opt/homebrew/bin/zed
+
+p="$1"
+case "$p" in
+  /*) ;;                                   # déjà absolu
+  "~/"*) p="$HOME/${p#"~/"}" ;;            # ~/foo -> $HOME/foo
+  "~") p="$HOME" ;;
+  *)                                        # relatif -> cwd du pane tmux actif
+    d="$("$TMUX_BIN" display-message -p '#{pane_current_path}' 2>/dev/null)"
+    [ -n "$d" ] && p="$d/$p"
+    ;;
+esac
+
+exec "$ZED_BIN" "$p"

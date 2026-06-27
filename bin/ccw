@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# ccw — Claude Code Worktree: isolated git worktree + tmux session + claude, per task.
+# Native: depends only on git, tmux, claude. Repo-agnostic.
+set -euo pipefail
+
+die() { printf 'ccw: %s\n' "$*" >&2; exit 1; }
+
+need_repo() {
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git repository"
+  ROOT="$(git rev-parse --show-toplevel)"
+  REPO="$(basename "$ROOT")"
+  WT_HOME="${CCW_HOME:-$(dirname "$ROOT")/${REPO}-worktrees}"
+}
+
+default_base() {
+  git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's#^refs/remotes/##' \
+    || echo "origin/main"
+}
+
+sanitize() { printf '%s' "$1" | tr -c 'A-Za-z0-9_-' '-'; }
+session_name() { printf '%s--%s' "$(sanitize "$REPO")" "$(sanitize "$1")"; }
+
+attach_session() {
+  if [ -n "${TMUX:-}" ]; then tmux switch-client -t "$1"; else tmux attach -t "$1"; fi
+}
+
+cmd_new() {
+  [ $# -ge 1 ] || die "usage: ccw new <task> [base-ref]"
+  need_repo
+  local task="$1" base="${2:-$(default_base)}"
+  local path="$WT_HOME/$task" branch="$task" s; s="$(session_name "$task")"
+  mkdir -p "$WT_HOME"
+  if [ -d "$path" ]; then
+    echo "ccw: worktree already exists at $path"
+  elif git show-ref --verify --quiet "refs/heads/$branch"; then
+    git worktree add "$path" "$branch"
+  else
+    [ "${CCW_FETCH:-0}" = "1" ] && git fetch origin --quiet || true
+    git worktree add -b "$branch" "$path" "$base"
+  fi
+  if ! tmux has-session -t "$s" 2>/dev/null; then
+    tmux new-session -d -s "$s" -c "$path"
+    tmux send-keys -t "$s" "${CCW_CMD:-claude}" C-m
+  fi
+  echo "ccw: task '$task'  branch=$branch  path=$path  session=$s"
+  attach_session "$s"
+}
+
+cmd_attach() {
+  [ $# -ge 1 ] || die "usage: ccw attach <task>"
+  need_repo
+  local s; s="$(session_name "$1")"
+  tmux has-session -t "$s" 2>/dev/null || die "no session '$s' (try: ccw new $1)"
+  attach_session "$s"
+}
+
+cmd_ls() {
+  need_repo
+  echo "# Worktrees ($REPO):"; git worktree list
+  echo; echo "# tmux sessions for $REPO:"
+  tmux ls 2>/dev/null | grep -E "^$(sanitize "$REPO")--" || echo "  (none)"
+}
+
+cmd_rm() {
+  need_repo
+  local force=0 task=""
+  for a in "$@"; do case "$a" in -f|--force) force=1 ;; *) task="$a" ;; esac; done
+  [ -n "$task" ] || die "usage: ccw rm <task> [-f]"
+  local path="$WT_HOME/$task" branch="$task" s; s="$(session_name "$task")"
+  local base; base="$(default_base)"
+  [ -d "$path" ] || die "no worktree at $path"
+  if [ "$force" -ne 1 ]; then
+    [ -z "$(git -C "$path" status --porcelain)" ] \
+      || die "worktree has uncommitted changes; commit/stash or rerun with -f"
+    git branch --merged "$base" --format='%(refname:short)' | grep -qx "$branch" \
+      || die "branch '$branch' not merged into ${base#origin/}; rerun with -f to force"
+  fi
+  tmux has-session -t "$s" 2>/dev/null && tmux kill-session -t "$s" || true
+  if [ "$force" -eq 1 ]; then
+    git worktree remove --force "$path"; git branch -D "$branch" 2>/dev/null || true
+  else
+    git worktree remove "$path"; git branch -d "$branch" 2>/dev/null || true
+  fi
+  git worktree prune
+  echo "ccw: removed worktree, branch, and session for '$task'"
+}
+
+usage() {
+  cat <<'EOF'
+ccw — Claude Code Worktree (git worktree + tmux + claude)
+  ccw new <task> [base]   create branch+worktree, start tmux session running claude, attach
+  ccw attach <task>       re-attach/switch to an existing task session
+  ccw ls                  list worktrees + their tmux sessions
+  ccw rm <task> [-f]      after merge: kill session, remove worktree, delete branch, prune
+  ccw help                this help
+Env: CCW_HOME (worktrees dir), CCW_CMD (default 'claude'), CCW_FETCH=1 (fetch before branching)
+EOF
+}
+
+case "${1:-help}" in
+  new) shift; cmd_new "$@" ;;
+  attach) shift; cmd_attach "$@" ;;
+  ls) shift; cmd_ls "$@" ;;
+  rm) shift; cmd_rm "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 1 ;;
+esac

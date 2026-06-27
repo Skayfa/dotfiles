@@ -1,0 +1,37 @@
+
+   TMUX — AIDE-MÉMOIRE        (préfixe = ⌘b ou Ctrl-b)
+   ════════════════════════════════════════════════════
+
+   ▸ PANES  (les cadres dans une fenêtre)
+       ⌥ h / j / k / l      aller au pane gauche/bas/haut/droite   ← SANS préfixe
+       préfixe  v           split en COLONNES (côte à côte  | )
+       préfixe  s           split en LIGNES  (l'un sous l'autre - )
+       préfixe  z           ZOOM plein écran le pane / dézoom
+       préfixe  x           fermer le pane
+       préfixe  H/J/K/L      redimensionner (garde le préfixe, répétable)
+       préfixe  Ctrl+h/j/k/l échanger le pane avec son voisin (direction)
+       préfixe  Ctrl+o       faire tourner tous les panes
+
+   ▸ FENÊTRES  (les onglets, en bas)
+       Shift ← / →          fenêtre précédente / suivante          ← SANS préfixe
+       préfixe  c           nouvelle fenêtre
+       préfixe  ,           renommer la fenêtre
+       préfixe  &           fermer la fenêtre
+       préfixe  w           vue arborescente fenêtres + sessions
+
+   ▸ SESSIONS  (tmux continue de tourner même fermé)
+       préfixe  d           se détacher (revient au shell)
+       tmux a               se rattacher    (dans le shell)
+
+   ▸ OUTILS / DIVERS
+       préfixe  g / G       lazygit  (popup / fenêtre)
+       préfixe  [           mode défilement/copie   (q pour sortir)
+       préfixe  r           recharger cette config
+       préfixe  ?           afficher cet aide-mémoire
+
+   ────────────────────────────────────────────────────
+   POUR APPRENDRE  (une couche à la fois) :
+     Jour 1 → ⌥hjkl (panes) + préfixe v/s (split) + préfixe z (zoom)
+     Jour 2 → Shift←/→ (fenêtres) + préfixe c (nouvelle)
+     Jour 3 → préfixe d / tmux a (sessions) + préfixe [ (copie)
+   La souris marche aussi : clic sur un pane / un onglet.   (q = fermer)

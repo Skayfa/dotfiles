@@ -1,0 +1,31 @@
+# lazygit — thème "Contraste élevé (cyan)"
+gui:
+  border: rounded
+  showFileTree: true
+  showPanelJumps: true
+  nerdFontsVersion: "3"        # icônes Nerd Font
+  theme:
+    activeBorderColor:
+      - "#00d7ff"             # panneau ACTIF : cyan vif
+      - bold
+    inactiveBorderColor:
+      - "#6c7086"             # panneaux inactifs : gris discret
+    searchingActiveBorderColor:
+      - "#00d7ff"
+      - bold
+    optionsTextColor:
+      - "#89b4fa"             # barre d'aide en bas
+    selectedLineBgColor:
+      - "#1f3b57"             # ligne sélectionnée : fond bleu visible
+    selectedRangeBgColor:
+      - "#1f3b57"
+    cherryPickedCommitFgColor:
+      - "#00d7ff"
+    cherryPickedCommitBgColor:
+      - "#45475a"
+    markedBaseCommitFgColor:
+      - "#f9e2af"
+    unstagedChangesColor:
+      - "#f38ba8"             # changements non-stagés : rouge/rose
+    defaultFgColor:
+      - default
