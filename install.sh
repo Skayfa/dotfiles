@@ -58,8 +58,7 @@ chmod +x "$HOME/.local/bin/ccw" "$HOME/.local/bin/zed-open"
 
 # nvim (dossier entier)
 say "Installation de la config neovim (NvChad 2.5)"
-backup "$HOME/.config/nvim"
-[ -e "$HOME/.config/nvim" ] && mv "$HOME/.config/nvim" "$HOME/.config/nvim.bak.$TS.moved" || true
+[ -e "$HOME/.config/nvim" ] && mv "$HOME/.config/nvim" "$HOME/.config/nvim.bak.$TS" || true
 mkdir -p "$HOME/.config/nvim"
 rsync -a "$DOTFILES/nvim/" "$HOME/.config/nvim/"
 

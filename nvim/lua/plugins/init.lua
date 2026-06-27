@@ -24,6 +24,7 @@ return {
         "json", "jsonc", "yaml",
         "markdown", "markdown_inline",
         "html", "css",
+        "gitcommit", "git_rebase", "diff",
       },
     },
   },

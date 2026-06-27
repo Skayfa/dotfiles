@@ -4,10 +4,10 @@ Config terminal complète : **Alacritty + tmux + zsh + Neovim (NvChad 2.5) + laz
 
 ## Installation (sur un nouveau Mac)
 
-Prérequis : **Homebrew** (https://brew.sh) et les outils ligne de commande Xcode (`xcode-select --install`).
+Prérequis : **Homebrew** (https://brew.sh), les outils Xcode (`xcode-select --install`), et **Claude Code** (https://claude.com/claude-code — requis par `ccw` et la config Agent Teams).
 
 ```bash
-git clone <ton-repo> ~/dotfiles
+git clone https://github.com/Skayfa/dotfiles.git ~/dotfiles
 cd ~/dotfiles
 ./install.sh
 ```

@@ -15,9 +15,10 @@ brew "jq"
 brew "neovim"
 cask "zed"
 
-# Proto / build + lib treesitter (le CLI tree-sitter est installé via npm dans install.sh)
+# Go (gopls/goimports via mason + gofmt) + proto (buf)
+# (le CLI tree-sitter est installé via npm dans install.sh, pas via brew)
+brew "go"
 brew "buf"
-brew "tree-sitter"
 
 # Node (requis par tree-sitter-cli, prettierd, certains LSP)
 brew "node"

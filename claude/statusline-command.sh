@@ -30,8 +30,8 @@ if git -C "${cwd:-$(pwd)}" rev-parse --git-dir > /dev/null 2>&1; then
   status_flags=""
   git_status=$(git -C "${cwd:-$(pwd)}" --no-optional-locks status --porcelain 2>/dev/null)
   [ -n "$git_status" ] && status_flags="*"
-  added=$(echo "$git_status" | grep -c "^[MADRC]" 2>/dev/null || echo 0)
-  [ "$added" -gt 0 ] && status_flags="${status_flags}+${added}"
+  added=$(echo "$git_status" | grep -c "^[MADRC]" 2>/dev/null)
+  [ "${added:-0}" -gt 0 ] && status_flags="${status_flags}+${added}"
   git_info=" on  ${branch}${status_flags:+ $status_flags}"
 fi
 
