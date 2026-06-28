@@ -10,6 +10,15 @@ brew "lazygit"
 brew "fd"
 brew "ripgrep"
 brew "jq"
+brew "fzf"
+
+# Shell UX : complétion, suggestions, navigation rapide (zsh/plugins.zsh)
+brew "zsh-autosuggestions"
+brew "zsh-syntax-highlighting"
+brew "zsh-completions"
+brew "zoxide"
+brew "eza"
+# fzf-tab n'est pas dans brew core : cloné par install.sh dans ~/.local/share/zsh
 
 # Éditeurs
 brew "neovim"

@@ -26,6 +26,14 @@ TS_BIN="$(npm config get prefix)/bin/tree-sitter"
 mkdir -p "$HOME/.local/bin"
 [ -e "$TS_BIN" ] && ln -sf "$TS_BIN" "$HOME/.local/bin/tree-sitter"
 
+# --- 2b. fzf-tab (complétion TAB floue ; pas dans brew core) ---
+say "Installation de fzf-tab"
+FZF_TAB_DIR="$HOME/.local/share/zsh/fzf-tab"
+if [ ! -d "$FZF_TAB_DIR" ]; then
+  mkdir -p "$HOME/.local/share/zsh"
+  git clone --depth 1 https://github.com/Aloxaf/fzf-tab "$FZF_TAB_DIR"
+fi
+
 # --- helpers ---
 backup() { [ -e "$1" ] && cp -R "$1" "$1.bak.$TS" && echo "  backup -> $1.bak.$TS" || true; }
 # installe un fichier en remplaçant le placeholder __HOME__ par $HOME
@@ -66,10 +74,12 @@ say "Installation de la config neovim (NvChad 2.5)"
 mkdir -p "$HOME/.config/nvim"
 rsync -a "$DOTFILES/nvim/" "$HOME/.config/nvim/"
 
-# --- 4. zsh : sourcer nos aliases ---
-say "Aliases zsh (vim->nvim, lg->lazygit)"
-LINE="source \"$DOTFILES/zsh/aliases.zsh\""
-grep -qF "$LINE" "$HOME/.zshrc" 2>/dev/null || printf '\n# setup dev\n%s\n' "$LINE" >> "$HOME/.zshrc"
+# --- 4. zsh : sourcer aliases puis plugins (plugins en DERNIER : syntax-highlighting) ---
+say "Aliases + plugins zsh (suggestions, fzf-tab, zoxide)"
+for f in aliases plugins; do
+  LINE="source \"$DOTFILES/zsh/$f.zsh\""
+  grep -qF "$LINE" "$HOME/.zshrc" 2>/dev/null || printf '\n# setup dev (%s)\n%s\n' "$f" "$LINE" >> "$HOME/.zshrc"
+done
 
 # --- Fin ---
 say "Terminé ✅"

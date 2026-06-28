@@ -1,0 +1,46 @@
+
+   ZSH — AIDE-MÉMOIRE LIGNE DE COMMANDE       (taper `cheat`  ou  Ctrl-X ?)
+   ════════════════════════════════════════════════════════════════════════
+
+   ▸ SE DÉPLACER dans la ligne
+       Ctrl-A  /  Ctrl-E        début  /  fin de ligne
+       ⌥←  /  ⌥→               mot précédent  /  mot suivant   (= Alt-B / Alt-F)
+       Ctrl-B  /  Ctrl-F        un caractère en arrière / en avant
+
+   ▸ SUPPRIMER & COUPER         (le texte coupé est gardé → recollable par Ctrl-Y)
+       Ctrl-U                  supprimer TOUTE la ligne
+       Ctrl-K                  couper du curseur → la fin de la ligne
+       Ctrl-W                  couper le mot à GAUCHE du curseur
+       ⌥D                      couper le mot à DROITE             (= Alt-D)
+       ⌥⌫                      supprimer le mot à gauche          (Option + Delete)
+       Ctrl-D                  supprimer le caractère sous le curseur
+
+   ▸ COLLER / ANNULER
+       Ctrl-Y                  coller le dernier texte coupé (yank)
+       ⌥Y                      juste après Ctrl-Y : cycler les coupes précédentes
+       Ctrl-_                  annuler (undo) — répétable
+
+   ▸ REMPLACER / RÉUTILISER
+       ^vieux^neuf  ⏎          relance la dernière commande en remplaçant « vieux » par « neuf »
+       ⌥.                      insérer le DERNIER argument de la commande d'avant (répéter pour remonter)
+       Ctrl-U  puis  retape    remplacer toute la ligne
+       ↑  /  ↓                 commande précédente / suivante (historique)
+
+   ▸ RECHERCHE & COMPLÉTION
+       →  (flèche droite)      accepter la suggestion GRISE (autosuggestion historique)
+       TAB                     complétion FLOUE — ex.  `git switch <TAB>`  = menu des branches
+       Ctrl-R                  recherche floue dans l'historique (fzf) — tape, ⏎ pour lancer
+       Ctrl-T                  insérer un fichier (fzf) dans la ligne
+       ⌥C                      cd dans un sous-dossier (fzf)
+       z <bout>                sauter à un dossier fréquent (zoxide)  ·  zi = picker
+
+   ▸ DIVERS
+       Ctrl-L                  effacer l'écran
+       Ctrl-C                  annuler la saisie en cours
+       cheat  /  Ctrl-X ?      afficher cet aide-mémoire        (q = fermer le pager)
+
+   ────────────────────────────────────────────────────────────────────────
+   POUR APPRENDRE  (une couche à la fois) :
+     Jour 1 → Ctrl-A/E (bords) + Ctrl-U (vider la ligne) + Ctrl-W (couper un mot)
+     Jour 2 → ⌥←/→ (mots) + ⌥. (dernier arg) + → (accepter l'autosuggestion)
+     Jour 3 → Ctrl-R (historique) + TAB sur les branches + z (dossiers)
