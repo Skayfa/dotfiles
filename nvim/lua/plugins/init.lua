@@ -74,4 +74,36 @@ return {
       end
     end,
   },
+
+  -- Panel SQL dans nvim (browse + requêtes), façon GoLand. <leader>D pour ouvrir.
+  {
+    "kristijanhusak/vim-dadbod-ui",
+    dependencies = {
+      { "tpope/vim-dadbod", lazy = true },
+      { "kristijanhusak/vim-dadbod-completion", ft = { "sql", "mysql", "plsql" }, lazy = true },
+    },
+    cmd = { "DBUI", "DBUIToggle", "DBUIAddConnection", "DBUIFindBuffer" },
+    init = function()
+      vim.g.db_ui_use_nerd_fonts = 1
+    end,
+  },
+
+  -- Autocomplétion SQL (tables/colonnes) : ajoute la source dadbod aux sources
+  -- globales de cmp. Fiable (pas de souci de timing lazy) ; cette source ne
+  -- propose des candidats que dans les buffers SQL connectés (b:db).
+  {
+    "hrsh7th/nvim-cmp",
+    dependencies = { "kristijanhusak/vim-dadbod-completion" },
+    opts = function(_, opts)
+      local cmp = require "cmp"
+      -- En SQL : colonnes/tables (dadbod) en PREMIER groupe ; le reste (lsp,
+      -- snippets, buffer…) en repli, affiché seulement si dadbod ne matche rien.
+      -- dadbod ne renvoie rien hors buffers SQL → comportement neutre ailleurs.
+      opts.sources = cmp.config.sources(
+        { { name = "vim-dadbod-completion" } },
+        opts.sources or {}
+      )
+      return opts
+    end,
+  },
 }

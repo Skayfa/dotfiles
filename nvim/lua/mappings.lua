@@ -41,4 +41,23 @@ end, { desc = "Onglet précédent" })
 -- Aide-mémoire Vim perso : <espace>?  ou  :Cheat
 require "cheat"
 
+-- DB UI (panel SQL, façon GoLand) : <espace>D
+map("n", "<leader>D", "<cmd>DBUIToggle<CR>", { desc = "DB: panel SQL (dadbod-ui)" })
+
+-- nvim-tree : garde anti-crash sur la suppression. Si `d` est pressé alors que le
+-- curseur n'est pas sur un fichier (ex. ligne de filtre), nvim-tree appelle son
+-- remove avec nil et plante (bug upstream remove_many(nil)) : on no-op à la place.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "NvimTree",
+  callback = function(ev)
+    vim.keymap.set("n", "d", function()
+      local api = require "nvim-tree.api"
+      local node = api.tree.get_node_under_cursor()
+      if node then
+        api.fs.remove(node)
+      end
+    end, { buffer = ev.buf, nowait = true, desc = "nvim-tree: delete (nil-safe)" })
+  end,
+})
+
 -- map({ "n", "i", "v" }, "<C-s>", "<cmd> w <cr>")

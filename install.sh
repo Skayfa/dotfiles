@@ -18,6 +18,8 @@ xcode-select -p >/dev/null 2>&1 || echo "Astuce: 'xcode-select --install' si le 
 # --- 1. Dépendances Homebrew ---
 say "Installation des dépendances (brew bundle)"
 brew bundle --file="$DOTFILES/Brewfile"
+# libpq (psql) est keg-only : l'exposer dans le PATH pour vim-dadbod (nvim DBUI)
+brew link --force libpq 2>/dev/null || true
 
 # --- 2. CLI tree-sitter (requis par nvim-treesitter, branche main) ---
 say "Installation du CLI tree-sitter (npm)"
@@ -32,6 +34,12 @@ FZF_TAB_DIR="$HOME/.local/share/zsh/fzf-tab"
 if [ ! -d "$FZF_TAB_DIR" ]; then
   mkdir -p "$HOME/.local/share/zsh"
   git clone --depth 1 https://github.com/Aloxaf/fzf-tab "$FZF_TAB_DIR"
+fi
+
+# --- 2c. lazysql (TUI DB) : fallback go install si absent de brew core ---
+if ! command -v lazysql >/dev/null 2>&1; then
+  say "Installation de lazysql (go install — absent de brew)"
+  command -v go >/dev/null 2>&1 && go install github.com/jorgerojas26/lazysql@latest || true
 fi
 
 # --- helpers ---

@@ -74,6 +74,14 @@ _cheat_widget() { zle -M "$(<"$CHEAT_SHEET")"; }
 zle -N _cheat_widget
 bindkey '^X?' _cheat_widget
 
+# --- db <name> : pgcli sur une base Postgres de dev locale --------------------
+db() {
+  command -v pgcli >/dev/null 2>&1 || { echo "pgcli manquant (brew install pgcli)"; return 1; }
+  local base="${PG_DEV_URL:-postgres://user:password@localhost:5432}"
+  pgcli "${base}/${1:-postgres}?sslmode=disable"
+}
+compdef '_values "db" syn trainsmith qollectiv integreat dummy skuld entrepotes billy hydra' db 2>/dev/null
+
 # --- syntax highlighting MUST be sourced last --------------------------------
 [[ -r "$BREW/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
   source "$BREW/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"

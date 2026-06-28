@@ -20,6 +20,11 @@ brew "zoxide"
 brew "eza"
 # fzf-tab n'est pas dans brew core : cloné par install.sh dans ~/.local/share/zsh
 
+# Accès base de données en terminal (CLI intelligent + TUI)
+brew "pgcli"
+brew "lazysql"
+brew "libpq"   # client psql — requis par vim-dadbod (keg-only → linké dans install.sh)
+
 # Éditeurs
 brew "neovim"
 cask "zed"
