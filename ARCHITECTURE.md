@@ -26,15 +26,20 @@ flowchart TD
 
     subgraph lanc["Lancés depuis zsh / tmux"]
         NVIM["Neovim · NvChad 2.5<br/>éditeur principal"]
-        LG["lazygit<br/>git TUI"]
+        LG["lazygit<br/>git TUI — stage / commit / push"]
+        HK["hunk<br/>diff viewer de review"]
         DBC["Clients DB<br/>pgcli · lazysql · dadbod-ui"]
     end
     ZSH --> NVIM
     ZSH --> LG
+    ZSH --> HK
     ZSH --> DBC
+    CLAUDE["Claude Code"] -. "annote le diff<br/>(daemon local)" .-> HK
 ```
 
-**Principe** : macOS → Alacritty (terminal) → tmux (découpe l'écran, garde les sessions) → zsh (shell + prompt) → on lance nvim / lazygit / clients DB. Zed est l'éditeur GUI, ouvert depuis le terminal par un clic sur un chemin.
+**Principe** : macOS → Alacritty (terminal) → tmux (découpe l'écran, garde les sessions) → zsh (shell + prompt) → on lance nvim / lazygit / hunk / clients DB. Zed est l'éditeur GUI, ouvert depuis le terminal par un clic sur un chemin.
+
+**Git, deux outils complémentaires** : **hunk** lit le changeset (et c'est la seule surface où Claude pose sa review, en annotations inline via un daemon local) ; **lazygit** fait le reste (stage, commit, push, branches). hunk ne sait pas commiter, lazygit ne sait pas annoter.
 
 ---
 
@@ -48,6 +53,8 @@ flowchart TD
 | `Cmd+Shift+clic` sur une URL   | Alacritty `[hints]`                  | ouvre dans le navigateur                                        |
 | `Ctrl+Alt+T`                   | Hammerspoon                          | **dropdown** Alacritty (90% écran)                              |
 | préfixe `g` / `G`              | tmux popup                           | **lazygit** (popup / fenêtre)                                   |
+| préfixe `h` / `hd`             | tmux popup / zsh                     | **hunk** — review du changeset (Claude y annote inline)         |
+| `git hdiff` / `git hshow`      | git (alias `~/.config/git/config`)   | diff / commit via **hunk** (le pager par défaut reste intact)   |
 | préfixe `D`                    | tmux popup                           | **lazysql** (bases de données)                                  |
 | préfixe `?`                    | tmux popup                           | aide-mémoire `tmux/cheatsheet.txt`                              |
 | `⌥ ←/→/↑/↓`                    | tmux (sans préfixe)                  | naviguer entre panes                                            |
@@ -126,7 +133,7 @@ flowchart TD
     CC["Claude Code"]
     CMD["~/.claude/CLAUDE.md"]
     GLOBAL["claude/GLOBAL.md<br/>ma méthode + préférences"]
-    SK["skills<br/>grill · verify · mac-cleanup"]
+    SK["skills<br/>grill · verify · hunk-review · mac-cleanup"]
     MCP["MCP<br/>sillon · Notion · playwright"]
     WF["WORKFLOW.md<br/>la boucle détaillée"]
 
@@ -145,7 +152,7 @@ flowchart TD
 
 ```
 dotfiles/
-├── install.sh            # pose tout le setup (brew bundle + substitution __HOME__ + clones/links)
+├── install.sh            # pose tout le setup (brew bundle + symlinks vers le repo + copies __HOME__)
 ├── Brewfile              # dépendances Homebrew (terminal, outils, LSP, clients DB…)
 ├── README.md             # comment installer / utiliser
 ├── WORKFLOW.md           # la MÉTHODE de dev (challenge → livraison fidèle)
@@ -156,6 +163,8 @@ dotfiles/
 ├── zsh/                  # plugins.zsh (UX) + aliases.zsh + cheatsheet.txt
 ├── starship/             # starship.toml (prompt)
 ├── lazygit/              # config.yml
+├── hunk/                 # config.toml (diff viewer de review + annotations agent)
+├── git/                  # config (alias hdiff/hshow ; l'identité reste dans ~/.gitconfig)
 ├── nvim/                 # config NvChad 2.5 complète (lua/…)
 ├── bin/                  # ccw (worktrees) · zed-open (ouvre un chemin dans Zed)
 └── claude/               # CLAUDE.md · GLOBAL.md · settings.json · skills/
@@ -171,11 +180,20 @@ flowchart TD
     RUN --> BREW["brew bundle (Brewfile)<br/>+ brew link --force libpq"]
     RUN --> TS["npm i -g tree-sitter-cli<br/>→ ~/.local/bin"]
     RUN --> CLONES["git clone fzf-tab<br/>(+ go install lazysql si absent)"]
-    RUN --> CONF["pose les configs<br/>(substitue __HOME__)"]
+    RUN --> CONF["pose les configs<br/>symlink -> repo (défaut)<br/>copie + __HOME__ (4 exceptions)"]
     CONF --> NVIM["nvim : installe plugins/LSP au 1er lancement"]
 ```
 
-`install.sh` est **idempotent** : il sauvegarde toute config existante en `*.bak.<date>` avant de la remplacer, et remplace le placeholder `__HOME__` par le vrai `$HOME` (pour la portabilité entre machines).
+`install.sh` est **idempotent** : il sauvegarde toute config existante en `*.bak.<date>` avant de la remplacer.
+
+Deux modes de pose :
+
+| Mode                  | Helper         | Effet                                                                             |
+| --------------------- | -------------- | --------------------------------------------------------------------------------- |
+| **Lié** (défaut)      | `link_file`    | symlink vers le repo → éditer `~/dotfiles` est actif **tout de suite**            |
+| **Copié** (exception) | `install_file` | copie + substitution `__HOME__` → `$HOME` ; il faut relancer `./install.sh`        |
+
+Le lien est le défaut. On ne copie que si c'est impossible autrement : chemin absolu sans shell pour étendre un `~` (`alacritty.toml` → `zed-open`), ou config que l'outil **réécrit lui-même** (`lazygit/config.yml`, `claude/settings.json`, `nvim/` où lazy.nvim écrit `lazy-lock.json`) — un lien lui ferait écrire dans le repo. `link_file` refuse tout fichier contenant encore `__HOME__`, puisqu'un lien ne passe jamais par le `sed`.
 
 ---
 
@@ -183,8 +201,9 @@ flowchart TD
 
 | Versionné (repo public)                                                                                       | Local (hors repo)                                                                             |
 | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Tout l'outillage générique : alacritty, tmux, zsh, nvim, starship, lazygit, claude, bin, Brewfile, install.sh | Connexions DB d'un projet (`~/Library/Application Support/lazysql/`, `~/.local/share/db_ui/`) |
+| Tout l'outillage générique : alacritty, tmux, zsh, nvim, starship, lazygit, hunk, claude, bin, Brewfile, install.sh | Connexions DB d'un projet (`~/Library/Application Support/lazysql/`, `~/.local/share/db_ui/`) |
 | La méthode (`GLOBAL.md`, skills)                                                                              | Tokens / secrets MCP (jamais commités)                                                        |
+| `git/config` : le **générique** de git (alias `hdiff`/`hshow`)                                                | `~/.gitconfig` : l'**identité** git (`user.name` / `user.email`) — jamais versionnée          |
 |                                                                                                               | `~/.zshrc`, `~/.tmux.conf`, `~/.config/nvim` (générés depuis le repo)                         |
 
 **Règle** : le repo est **public** → uniquement du générique, jamais de secret. Les creds dev locaux (`user/password@localhost`) sont des defaults non-secrets.

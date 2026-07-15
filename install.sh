@@ -44,37 +44,64 @@ fi
 
 # --- helpers ---
 backup() { [ -e "$1" ] && cp -R "$1" "$1.bak.$TS" && echo "  backup -> $1.bak.$TS" || true; }
-# installe un fichier en remplaçant le placeholder __HOME__ par $HOME
+# COPIE un fichier en remplaçant le placeholder __HOME__ par $HOME.
+# Réservé aux cas qui ne peuvent PAS être liés : chemin absolu sans shell pour
+# l'étendre (alacritty), ou fichier que l'outil réécrit lui-même (settings.json,
+# lazygit). Éditer le repo n'a alors d'effet qu'après un ./install.sh.
 install_file() {
   local src="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
   backup "$dest"
   sed "s|__HOME__|$HOME|g" "$src" > "$dest"
-  echo "  installé -> $dest"
+  echo "  copié    -> $dest"
+}
+# LIE un fichier/dossier au repo : éditer ~/dotfiles est actif immédiatement,
+# sans relancer ./install.sh. Interdit si le fichier contient __HOME__ (pas de
+# sed sur un lien) ou si l'outil réécrit sa config (il écrirait dans le repo).
+link_file() {
+  local src="$1" dest="$2"
+  if grep -q '__HOME__' "$src" 2>/dev/null; then
+    echo "  ERREUR: $src contient __HOME__ et ne peut pas être lié" >&2; return 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  # déjà le bon lien : ne rien faire (évite d'empiler des backups à chaque run)
+  if [ -L "$dest" ] && [ "$(readlink "$dest")" = "$DOTFILES/${src#$DOTFILES/}" ]; then
+    echo "  lié      -> $dest (déjà)"; return 0
+  fi
+  backup "$dest"
+  rm -rf "$dest"
+  ln -sfn "$src" "$dest"
+  echo "  lié      -> $dest"
 }
 
 # --- 3. Configs ---
 say "Installation des configs"
+# -- COPIÉS (impossible à lier, cf. commentaire des helpers) --
+# alacritty : chemin absolu vers zed-open, lancé sans shell -> ni ~ ni $HOME ne s'étendraient
 install_file "$DOTFILES/alacritty/alacritty.toml" "$HOME/.config/alacritty/alacritty.toml"
-install_file "$DOTFILES/tmux/tmux.conf"           "$HOME/.tmux.conf"
-install_file "$DOTFILES/tmux/cheatsheet.txt"      "$HOME/.config/tmux/cheatsheet.txt"
-install_file "$DOTFILES/hammerspoon/init.lua"     "$HOME/.hammerspoon/init.lua"
+# lazygit réécrit son config.yml quand on change un réglage dans l'UI
 install_file "$DOTFILES/lazygit/config.yml"       "$HOME/Library/Application Support/lazygit/config.yml"
+# Claude Code réécrit settings.json (thème via /config) + contient __HOME__
+install_file "$DOTFILES/claude/settings.json"     "$HOME/.claude/settings.json"
 
-# Claude Code (Agent Teams tmux + statusline) + Starship (prompt)
-install_file "$DOTFILES/claude/settings.json"          "$HOME/.claude/settings.json"
-install_file "$DOTFILES/claude/statusline-command.sh"  "$HOME/.claude/statusline-command.sh"
-chmod +x "$HOME/.claude/statusline-command.sh"
-# CLAUDE.md global (importe claude/GLOBAL.md du repo) + skills grill/verify
-install_file "$DOTFILES/claude/CLAUDE.md"              "$HOME/.claude/CLAUDE.md"
-mkdir -p "$HOME/.claude/skills"
-rsync -a "$DOTFILES/claude/skills/" "$HOME/.claude/skills/"
-[ -f "$DOTFILES/starship/starship.toml" ] && install_file "$DOTFILES/starship/starship.toml" "$HOME/.config/starship.toml"
+# -- LIÉS au repo (éditer ~/dotfiles est actif tout de suite) --
+link_file "$DOTFILES/tmux/tmux.conf"              "$HOME/.tmux.conf"
+link_file "$DOTFILES/tmux/cheatsheet.txt"         "$HOME/.config/tmux/cheatsheet.txt"
+link_file "$DOTFILES/hammerspoon/init.lua"        "$HOME/.hammerspoon/init.lua"
+link_file "$DOTFILES/hunk/config.toml"            "$HOME/.config/hunk/config.toml"
+# config git générique (alias hdiff/hshow) : ~/.gitconfig garde l'identité, jamais touché
+link_file "$DOTFILES/git/config"                  "$HOME/.config/git/config"
+link_file "$DOTFILES/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
+chmod +x "$DOTFILES/claude/statusline-command.sh"
+# CLAUDE.md global (importe claude/GLOBAL.md du repo) + skills (grill/verify/hunk-review/mac-cleanup)
+link_file "$DOTFILES/claude/CLAUDE.md"            "$HOME/.claude/CLAUDE.md"
+link_file "$DOTFILES/claude/skills"               "$HOME/.claude/skills"
+[ -f "$DOTFILES/starship/starship.toml" ] && link_file "$DOTFILES/starship/starship.toml" "$HOME/.config/starship.toml"
 
 # scripts
-install_file "$DOTFILES/bin/ccw"      "$HOME/.local/bin/ccw"
-install_file "$DOTFILES/bin/zed-open" "$HOME/.local/bin/zed-open"
-chmod +x "$HOME/.local/bin/ccw" "$HOME/.local/bin/zed-open"
+link_file "$DOTFILES/bin/ccw"      "$HOME/.local/bin/ccw"
+link_file "$DOTFILES/bin/zed-open" "$HOME/.local/bin/zed-open"
+chmod +x "$DOTFILES/bin/ccw" "$DOTFILES/bin/zed-open"
 
 # nvim (dossier entier)
 say "Installation de la config neovim (NvChad 2.5)"

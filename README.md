@@ -21,16 +21,20 @@ Le script installe les dépendances (Brewfile), le CLI `tree-sitter`, puis pose 
 | Dossier        | Cible                                    | Contenu                                                                                                                                                                                                        |
 | -------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `alacritty/`   | `~/.config/alacritty/`                   | police Nerd Font, palette Everforest, fenêtre sans titre, `⌘b`→préfixe tmux, `⌘⇧clic`/`Ctrl⇧O` ouvre un fichier dans Zed (via `bin/zed-open`)                                                                  |
-| `tmux/`        | `~/.tmux.conf`, `~/.config/tmux/`        | statusbar Powerline cyan, nav fluide, lazygit (`préfixe g`) + lazysql (`préfixe D`) en popup, aide-mémoire `préfixe ?`                                                                                         |
+| `tmux/`        | `~/.tmux.conf`, `~/.config/tmux/`        | statusbar Powerline cyan, nav fluide, lazygit (`préfixe g`) + hunk (`préfixe h`) + lazysql (`préfixe D`) en popup, aide-mémoire `préfixe ?`                                                                    |
 | `nvim/`        | `~/.config/nvim/`                        | NvChad 2.5 (thème catppuccin-latte) : LSP (gopls, ts_ls, jsonls, yamlls, marksman, **buf_ls** pour proto), treesitter, formatage, nav IDE, fuzzy fd+fzf, **panel SQL dadbod-ui** (`espace D`), helper `:Cheat` |
 | `lazygit/`     | `~/Library/Application Support/lazygit/` | thème contraste cyan                                                                                                                                                                                           |
+| `hunk/`        | `~/.config/hunk/`                        | diff viewer orienté review (thème everforest-dark) : lit le changeset, **Claude y pose ses remarques en annotations inline**                                                                                   |
+| `git/`         | `~/.config/git/`                         | config git **générique** : alias `git hdiff` / `git hshow` (review via hunk). L'identité reste dans `~/.gitconfig`, local et hors repo                                                                         |
 | `hammerspoon/` | `~/.hammerspoon/`                        | drop-down Alacritty sur `Ctrl+Alt+T`                                                                                                                                                                           |
 | `bin/`         | `~/.local/bin/`                          | `ccw` (git worktree + tmux + claude), `zed-open` (ouvre un chemin dans Zed)                                                                                                                                    |
 | `zsh/`         | sourcé par `~/.zshrc`                    | UX shell : autosuggestions, **fzf-tab** (TAB flou : branches git), **zoxide** (`z`), **eza**, bindings fzf+fd, historique persistant, aide-mémoire `cheat`, helper DB `db <name>` ; alias `vim`/`lg`           |
 | `claude/`      | `~/.claude/`                             | Claude Code : Agent Teams (`teammateMode: tmux`) + statusline custom                                                                                                                                           |
 | `starship/`    | `~/.config/`                             | prompt Starship (que la statusline Claude reprend)                                                                                                                                                             |
 
-> Les chemins absolus sont stockés en placeholder `__HOME__` et résolus à l'install → portable quel que soit ton nom d'utilisateur.
+> **Lié, pas copié** : la plupart des configs sont des **symlinks** vers ce repo → tu édites `~/dotfiles`, c'est actif immédiatement, sans relancer `./install.sh`.
+>
+> Quatre exceptions sont **copiées** (et là il faut relancer `./install.sh` pour appliquer) : `alacritty.toml` (chemin absolu vers `zed-open`, lancé sans shell pour étendre un `~`), `lazygit/config.yml` et `claude/settings.json` (ces outils réécrivent leur propre config — un lien les ferait écrire dans le repo), et `nvim/` (lazy.nvim y écrit `lazy-lock.json`). Ces fichiers-là utilisent le placeholder `__HOME__`, résolu à l'install → portable quel que soit ton nom d'utilisateur.
 
 ## Raccourcis clés (mémo)
 
@@ -38,7 +42,7 @@ Le script installe les dépendances (Brewfile), le CLI `tree-sitter`, puis pose 
 
 - `⌥←/→/↑/↓` naviguer entre panes · `Shift←/→` changer de fenêtre
 - `préfixe v`/`s` split · `préfixe z` zoom · `préfixe Ctrl-hjkl` échanger un pane
-- `préfixe g` lazygit (popup) · `préfixe D` lazysql (bases de données)
+- `préfixe g` lazygit (popup) · `préfixe h` hunk (review du diff) · `préfixe D` lazysql (bases de données)
 
 **neovim** (leader = `espace`) — détail : `espace ?` (`:Cheat`) ou `espace` + attendre (which-key)
 
@@ -55,9 +59,11 @@ Le script installe les dépendances (Brewfile), le CLI `tree-sitter`, puis pose 
 
 **lazygit** : `Ctrl-b g` (popup) · `lg` (plein écran)
 
+**review d'un changeset** : `hd` (hunk, plein écran) · `Ctrl-b h` (popup) · `hd --watch` (se recharge pendant qu'un agent édite) · `git hdiff` / `git hshow`. Une session hunk ouverte = Claude peut y poser sa review en **annotations inline** (skill `hunk-review`). Le stage/commit/push reste dans lazygit.
+
 ## Mise à jour
 
-Édite les fichiers dans `~/dotfiles`, commit, push. Sur l'autre Mac : `git pull && ./install.sh`.
+Édite les fichiers dans `~/dotfiles` — c'est **actif immédiatement** (symlinks), sauf pour les 4 fichiers copiés ci-dessus qui demandent un `./install.sh`. Puis commit, push. Sur l'autre Mac : `git pull` (+ `./install.sh` si l'un des 4 a bougé, ou au premier setup).
 
 ## Désinstaller / revenir en arrière
 
