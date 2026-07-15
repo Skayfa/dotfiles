@@ -25,6 +25,7 @@
 
    ▸ OUTILS / DIVERS
        préfixe  g / G       lazygit  (popup / fenêtre)
+       préfixe  h           hunk — review du diff courant (popup)
        préfixe  D           lazysql — bases de données (popup)
        préfixe  [           mode défilement/copie   (q pour sortir)
        préfixe  r           recharger cette config

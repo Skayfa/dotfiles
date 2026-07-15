@@ -3,18 +3,19 @@ name: verify
 description: Faithfulness gate before shipping. Generates a test plan from the agreed acceptance criteria, runs the project's test command (from AGENTS.md), and checks every criterion is covered by a passing test. Refuses to ship if any criterion is uncovered or failing. Use after building, before opening the MR/PR.
 ---
 
-# Verify — gate de fidélité
+# Verify
 
-Objectif : ne **livrer que ce qui couvre chaque critère d'acceptation** validé au `grill`.
+Ship only what covers every acceptance criterion agreed at `grill`.
 
-## Étapes
+## Steps
 
-1. **Récupérer les critères d'acceptation** du contrat (issus du `grill` / Notion `Plan` / `task/plans/ET-XXXX.md`).
-2. **Générer le plan de test** : pour chaque critère, lister le(s) test(s) qui le prouve(nt) — unitaire / intégration / manuel.
-3. **Lancer les tests du projet** : la commande définie dans l'`AGENTS.md` du repo, section « Comment tester » (ex. dolmen `task test-pkg PKG=…`, exelab `pnpm test`, proof-cast `make test`). Ne pas contourner les guards (ex. `go test` brut bloqué dans dolmen).
-4. **Matrice de couverture** : `critère → test → ✅ / ❌`. Lister explicitement les critères **non couverts** (test manquant ou en échec).
-5. **Verdict** :
-   - Un critère non couvert / un test en échec → **NE PAS livrer** ; lister précisément ce qui manque à faire.
-   - Tout couvert + tests verts → **prêt pour la MR/PR**.
+1. **Collect the criteria** from the contract (grill / Notion `Plan` / `task/plans/ET-XXXX.md`).
+2. **Build the test plan** — for each criterion, the test(s) that prove it: unit, integration, or manual.
+3. **Run the project's tests** — the command from the repo's `AGENTS.md`, section "Comment tester" (e.g. dolmen `task test-pkg PKG=…`, exelab `pnpm test`, proof-cast `make test`). Never bypass the guards (raw `go test` is blocked in dolmen).
+4. **Coverage matrix** — `criterion → test → ✅ / ❌`. List uncovered criteria explicitly (test missing or failing).
+5. **Put the verdict in the diff** — if a hunk session is live (`hunk session list`), post each uncovered criterion as an inline note on the offending file and line (`❌ Uncovered criterion: …`), with `--focus` on the first. An uncovered criterion is actionable next to the code, not in the chat. Commands: skill `hunk-review`. No session open → skip this step.
+6. **Verdict**
+   - Any criterion uncovered, or any test failing → **do not ship**; list precisely what is missing.
+   - All covered, tests green → **ready for MR/PR**.
 
-Termine TOUJOURS par : la matrice de couverture + le verdict (ship / pas ship). En cas de « pas ship », donne la todo restante.
+Always end with: the coverage matrix + the verdict (ship / no ship). On "no ship", give the remaining todo.

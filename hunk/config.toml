@@ -1,0 +1,21 @@
+# hunk — diff viewer orienté review (posé par install.sh dans ~/.config/hunk/)
+# Un ~/.hunk/config.toml dans un repo surcharge ce fichier au cas par cas.
+
+# Thème clair (le terminal reste en Everforest Dark : hunk peint son propre fond).
+# ATTENTION : un id de thème inconnu n'est PAS rejeté — hunk retombe silencieusement
+# sur un thème sombre. Si le fond redevient sombre, c'est une coquille ici.
+# `t` dans le TUI ouvre le sélecteur pour essayer autre chose.
+theme = "github-light-default"
+
+# split / stack selon la largeur du terminal (utile en pane tmux étroit)
+mode = "auto"
+vcs = "git"
+
+# --watch s'active à la demande (`hd --watch`), pas par défaut
+watch = false
+
+line_numbers = true
+wrap_lines = false
+
+# affiche les annotations posées par l'agent — c'est le cœur de l'intérêt de hunk ici
+agent_notes = true

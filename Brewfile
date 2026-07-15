@@ -7,6 +7,7 @@ cask "hammerspoon"
 
 # Git TUI + recherche rapide
 brew "lazygit"
+brew "hunk"    # diff viewer orienté review (annotations agent inline) — complète lazygit
 brew "fd"
 brew "ripgrep"
 brew "jq"

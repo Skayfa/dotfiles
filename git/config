@@ -1,0 +1,13 @@
+# Config git GÉNÉRIQUE — posée par install.sh dans ~/.config/git/config.
+#
+# git lit les DEUX fichiers globaux : ~/.config/git/config puis ~/.gitconfig
+# (ce dernier gagne en cas de conflit). L'identité (user.name / user.email) reste
+# donc dans ~/.gitconfig, local et hors du repo public — cf. ARCHITECTURE.md §9.
+
+# Review via hunk. Le pager par défaut reste intact : `git diff` / `git log` ne
+# changent pas, seuls hdiff/hshow passent par hunk.
+# Les quotes DOIVENT être échappées : sans \", git config les mange à la lecture
+# et l'alias se casse en `core.pager=hunk pager diff`.
+[alias]
+	hdiff = -c core.pager=\"hunk pager\" diff
+	hshow = -c core.pager=\"hunk pager\" show
