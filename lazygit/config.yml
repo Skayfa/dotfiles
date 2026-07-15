@@ -1,4 +1,12 @@
-# lazygit — thème "Contraste élevé (cyan)"
+# lazygit — palette GitHub, accordée à hunk (theme = github-light-default).
+#
+# Pourquoi PAS les couleurs de GitHub Light ici : lazygit ne peint pas son fond,
+# il hérite de celui du terminal (Everforest Dark #2d353b). Sur ce fond, les
+# couleurs de GitHub Light plafonnent à ~2.4 de contraste (illisible, cf. le bug
+# "noir sur noir" corrigé en 8bb4e93), et son fond de sélection #ddf4ff tombe à
+# 1.49 avec le texte clair. On garde donc la MÊME palette de marque, mais ses
+# variantes sombres : ~4.9 de contraste. defaultFgColor reste `default` = le
+# texte du terminal, jamais une couleur en dur.
 gui:
   border: rounded
   showFileTree: true
@@ -6,27 +14,27 @@ gui:
   nerdFontsVersion: "3"        # icônes Nerd Font
   theme:
     activeBorderColor:
-      - "#00d7ff"             # panneau ACTIF : cyan vif
+      - "#58a6ff"             # panneau ACTIF : bleu GitHub
       - bold
     inactiveBorderColor:
-      - "#6c7086"             # panneaux inactifs : gris discret
+      - "#8b949e"             # panneaux inactifs : gris discret (contraste volontairement bas)
     searchingActiveBorderColor:
-      - "#00d7ff"
+      - "#58a6ff"
       - bold
     optionsTextColor:
-      - "#89b4fa"             # barre d'aide en bas
+      - "#58a6ff"             # barre d'aide en bas
     selectedLineBgColor:
-      - "#1f3b57"             # ligne sélectionnée : fond bleu visible
+      - "#0a3069"             # ligne sélectionnée : bleu GitHub profond (texte lisible dessus)
     selectedRangeBgColor:
-      - "#1f3b57"
+      - "#0a3069"
     cherryPickedCommitFgColor:
-      - "#00d7ff"
+      - "#58a6ff"
     cherryPickedCommitBgColor:
-      - "#45475a"
+      - "#30363d"
     markedBaseCommitFgColor:
-      - "#f9e2af"
+      - "#d29922"             # jaune GitHub
     unstagedChangesColor:
-      - "#f38ba8"             # changements non-stagés : rouge/rose
+      - "#ff7b72"             # changements non-stagés : rouge GitHub
     defaultFgColor:
       - default
 
