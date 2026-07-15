@@ -1,7 +1,11 @@
 [window]
 padding = { x = 10, y = 10 }
 decorations = "none"
-option_as_alt = "Both"          # utile pour les raccourcis sur clavier mac
+# Les DEUX Options = Alt : ⌥←/→ saute un mot et ⌥flèches change de pane, des deux côtés.
+# Contrepartie : Option ne compose plus les caractères macOS (~ [ ] { } | en AZERTY).
+# On les rend explicitement dans [keyboard].bindings plus bas — possible parce
+# qu'aucun raccourci ⌥+lettre n'est utilisé (Alt ne sert qu'avec flèches et ⌫).
+option_as_alt = "Both"
 
 [font]
 size = 14.0
@@ -43,6 +47,11 @@ bindings = [
   { key = "B", mods = "Command", chars = "\u0002" },
   # Shift+Entree -> saut de ligne dans Claude Code CLI
   { key = "Return", mods = "Shift", chars = "\n" },
+  # --- Caractères AZERTY confisqués par option_as_alt = "Both" : on les rend ici ---
+  # Bonus : envoi direct, sans touche morte (~ ne demande plus d'espace après).
+  { key = "N", mods = "Alt", chars = "~" },
+  # Cmd+Delete -> efface toute la ligne (Ctrl-U = kill-whole-line en zsh), comme sur macOS
+  { key = "Back", mods = "Command", chars = "\u0015" },
 ]
 
 # --- Couleurs : palette Everforest Dark (sombre, bon contraste, lisible) ---
