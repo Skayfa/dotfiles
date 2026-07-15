@@ -19,6 +19,7 @@ return {
       ensure_installed = {
         "vim", "vimdoc", "lua", "bash",
         "go", "gomod", "gosum", "gowork",
+        "rust", "toml",   -- toml : Cargo.toml / Cargo.lock
         "proto",
         "typescript", "tsx", "javascript",
         "json", "jsonc", "yaml",

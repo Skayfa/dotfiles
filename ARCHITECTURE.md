@@ -91,8 +91,8 @@ Tout est dans [`zsh/plugins.zsh`](zsh/plugins.zsh), sourcé **en dernier** par `
 ```mermaid
 flowchart TD
     NV["Neovim · NvChad 2.5<br/>thème catppuccin-latte"]
-    NV --> LSP["LSP (vim.lsp.enable)<br/>gopls · ts_ls · jsonls · yamlls · marksman · buf_ls (proto)"]
-    NV --> FMT["Formatters (conform)<br/>goimports/gofmt · prettierd · buf"]
+    NV --> LSP["LSP (vim.lsp.enable)<br/>gopls · ts_ls · rust_analyzer · jsonls · yamlls · marksman · buf_ls (proto)"]
+    NV --> FMT["Formatters (conform)<br/>goimports/gofmt · prettierd · rustfmt · buf"]
     NV --> TS["treesitter<br/>(CLI tree-sitter via npm)"]
     NV --> TEL["telescope + fzf-native + fd<br/>(recherche)"]
     NV --> DBUI["vim-dadbod-ui + completion<br/>(panel SQL, &lt;leader&gt;D)"]
@@ -100,6 +100,8 @@ flowchart TD
 ```
 
 Fichiers clés : [`nvim/lua/plugins/init.lua`](nvim/lua/plugins/init.lua) (plugins), [`nvim/lua/configs/lspconfig.lua`](nvim/lua/configs/lspconfig.lua) (LSP + auto-restart marksman), [`nvim/lua/mappings.lua`](nvim/lua/mappings.lua) (`<leader>D`, garde nvim-tree), [`nvim/lua/chadrc.lua`](nvim/lua/chadrc.lua) (thème).
+
+**D'où viennent les LSP** : tous via **mason** (`mason-tool-installer`, liste dans `plugins/init.lua`), **sauf `rust_analyzer` et `rustfmt`** qui viennent de **rustup** (`install.sh` fait `rustup component add rust-analyzer rust-src`). Raison : rust-analyzer doit rester accordé à la version de `rustc`, et il lit `rust-src` pour compléter la bibliothèque standard — une copie mason indépendante dériverait de la toolchain.
 
 ---
 

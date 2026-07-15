@@ -1,6 +1,6 @@
 # dotfiles — setup dev macOS (Apple Silicon)
 
-Config terminal complète : **Alacritty + tmux + zsh + Neovim (NvChad 2.5) + lazygit + Hammerspoon**, avec **accès base de données en terminal** (pgcli · lazysql · dadbod-ui), pensée pour un stack **Go / React-TS / Proto (buf)**.
+Config terminal complète : **Alacritty + tmux + zsh + Neovim (NvChad 2.5) + lazygit + Hammerspoon**, avec **accès base de données en terminal** (pgcli · lazysql · dadbod-ui), pensée pour un stack **Go / Rust / React-TS / Proto (buf)**.
 
 **Docs** : [`ARCHITECTURE.md`](ARCHITECTURE.md) — schéma visuel de comment tout est câblé · [`WORKFLOW.md`](WORKFLOW.md) — la méthode de dev (challenge → livraison fidèle).
 
@@ -22,7 +22,7 @@ Le script installe les dépendances (Brewfile), le CLI `tree-sitter`, puis pose 
 | -------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `alacritty/`   | `~/.config/alacritty/`                   | police Nerd Font, palette Everforest, fenêtre sans titre, `⌘b`→préfixe tmux, `⌘⇧clic`/`Ctrl⇧O` ouvre un fichier dans Zed (via `bin/zed-open`)                                                                  |
 | `tmux/`        | `~/.tmux.conf`, `~/.config/tmux/`        | statusbar Powerline cyan, nav fluide, lazygit (`préfixe g`) + hunk (`préfixe h`) + lazysql (`préfixe D`) en popup, aide-mémoire `préfixe ?`                                                                    |
-| `nvim/`        | `~/.config/nvim/`                        | NvChad 2.5 (thème catppuccin-latte) : LSP (gopls, ts_ls, jsonls, yamlls, marksman, **buf_ls** pour proto), treesitter, formatage, nav IDE, fuzzy fd+fzf, **panel SQL dadbod-ui** (`espace D`), helper `:Cheat` |
+| `nvim/`        | `~/.config/nvim/`                        | NvChad 2.5 (thème catppuccin-latte) : LSP (gopls, ts_ls, **rust_analyzer**, jsonls, yamlls, marksman, **buf_ls** pour proto), treesitter, formatage, nav IDE, fuzzy fd+fzf, **panel SQL dadbod-ui** (`espace D`), helper `:Cheat` |
 | `lazygit/`     | `~/Library/Application Support/lazygit/` | thème contraste cyan                                                                                                                                                                                           |
 | `hunk/`        | `~/.config/hunk/`                        | diff viewer orienté review (thème everforest-dark) : lit le changeset, **Claude y pose ses remarques en annotations inline**                                                                                   |
 | `git/`         | `~/.config/git/`                         | config git **générique** : alias `git hdiff` / `git hshow` (review via hunk). L'identité reste dans `~/.gitconfig`, local et hors repo                                                                         |

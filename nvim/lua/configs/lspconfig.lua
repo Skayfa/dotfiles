@@ -38,7 +38,9 @@ do
 end
 
 -- proto : LSP buf (`buf lsp serve`) ; chaque langage a son serveur
-local servers = { "html", "cssls", "gopls", "ts_ls", "jsonls", "yamlls", "marksman", "buf_ls" }
+-- rust_analyzer vient de rustup (`rustup component add rust-analyzer`), PAS de mason :
+-- il doit rester accordé à la toolchain, et il lit rust-src pour compléter la std.
+local servers = { "html", "cssls", "gopls", "ts_ls", "jsonls", "yamlls", "marksman", "buf_ls", "rust_analyzer" }
 vim.lsp.enable(servers)
 
 -- read :h vim.lsp.config for changing options of lsp servers 

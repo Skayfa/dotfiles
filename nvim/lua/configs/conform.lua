@@ -13,6 +13,7 @@ local options = {
     html = { "prettierd", "prettier", stop_after_first = true },
     css = { "prettierd", "prettier", stop_after_first = true },
     proto = { "buf" },
+    rust = { "rustfmt" },   -- fourni par rustup, comme rust-analyzer
   },
 
   -- Formatage manuel via <leader>fm. Pour formater à la sauvegarde, décommente :

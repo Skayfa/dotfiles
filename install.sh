@@ -42,6 +42,20 @@ if ! command -v lazysql >/dev/null 2>&1; then
   command -v go >/dev/null 2>&1 && go install github.com/jorgerojas26/lazysql@latest || true
 fi
 
+# --- 2d. Rust : toolchain via rustup (pas brew — rustup gère composants et versions) ---
+# rustup-init ajoute lui-même `. "$HOME/.cargo/env"` à ~/.zshenv (donc ~/.cargo/bin sur le PATH).
+if ! command -v rustup >/dev/null 2>&1; then
+  say "Installation de la toolchain Rust (rustup)"
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+if command -v rustup >/dev/null 2>&1; then
+  # rust-analyzer : le LSP de nvim, tenu accordé à la toolchain (jamais via mason).
+  # rust-src : sans lui, rust-analyzer ne complète pas la bibliothèque standard.
+  say "Composants Rust pour nvim (rust-analyzer + rust-src)"
+  rustup component add rust-analyzer rust-src 2>/dev/null || true
+fi
+
 # --- helpers ---
 backup() { [ -e "$1" ] && cp -R "$1" "$1.bak.$TS" && echo "  backup -> $1.bak.$TS" || true; }
 # COPIE un fichier en remplaçant le placeholder __HOME__ par $HOME.

@@ -32,6 +32,8 @@ cask "zed"
 
 # Go (gopls/goimports via mason + gofmt) + proto (buf)
 # (le CLI tree-sitter est installé via npm dans install.sh, pas via brew)
+# (Rust : via rustup dans install.sh, pas brew — rustup gère toolchain + composants,
+#  et fournit un rust-analyzer/rustfmt accordés à la version de rustc)
 brew "go"
 brew "buf"
 
