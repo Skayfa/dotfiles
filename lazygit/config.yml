@@ -29,3 +29,11 @@ gui:
       - "#f38ba8"             # changements non-stagés : rouge/rose
     defaultFgColor:
       - default
+
+# Cycle des onglets d'un panneau (Files <-> Worktrees <-> Submodules, etc.)
+# Defaults '[' / ']' inutilisables en AZERTY Mac (option_as_alt). Ctrl+h = Backspace
+# dans Alacritty, donc prevTab -> Ctrl+a ("arrière"), nextTab -> Ctrl+l.
+keybinding:
+  universal:
+    prevTab: "<c-a>"
+    nextTab: "<c-l>"
