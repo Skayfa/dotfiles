@@ -9,10 +9,11 @@ Livrer **clean et fidèle à ce qui a été vraiment demandé**. Avant de coder 
 1. **Intake** — lire le ticket (Notion MCP : `Plan`, `Type`, `Epic`, critères). Si un subject `sillon` existe (slug ↔ ID ticket), le lire (sillon MCP `get_subject` : objectif, décisions, REX, points ouverts).
 2. **Grill (challenge)** — confronter la spec à 4 sources : transcripts/décisions (sillon), l'epic (Notion), **la codebase**, insights clients. Sortir : gaps, contradictions, **critères d'acceptation manquants**, pending questions. Profondeur selon le `Type`. → skill **`grill`**.
 3. **Contrat** — spec + critères d'acceptation explicites validés. Le REX (décisions) vit dans `sillon`.
-4. **Build** — selon l'`AGENTS.md` du projet (« Comment tester » / « Comment livrer »).
+4. **Build** — selon l'`AGENTS.md` du projet (« Comment tester » / « Comment livrer »). Avant d'implémenter, chercher un pattern existant dans **reference-patterns** (`~/Workspace/learning/reference-patterns` en local — `llms.txt` est l'index ; GitMCP `patterns` à distance) et le réutiliser s'il couvre le besoin.
 5. **Gate de fidélité** — générer le plan de test depuis les critères, lancer les tests du projet, cocher chaque critère. **Ne pas livrer si un critère n'est pas couvert.** → skill **`verify`**. Session `hunk` ouverte → les critères non couverts se posent en annotations inline sur le code fautif.
 6. **Review** — lire le changeset dans **`hunk`** (`hd`, ou `préfixe h`) ; Claude annote le diff inline (critères, risques, suites) → skill **`hunk-review`**.
 7. **Ship** — stage/commit/push dans **lazygit** ; MR/PR selon le projet ; review ; merge.
+8. **Distill** — si le chantier a produit une technique généralisable → skill **`distill`** : l'extraire dans reference-patterns (exemple auto-porté testé + le chemin des alternatives rejetées). Repo public — jamais de code client.
 
 Perso : même boucle ; le contrat = l'idée qui se précise ; le grill est itératif dans le temps.
 
@@ -28,5 +29,6 @@ Perso : même boucle ; le contrat = l'idée qui se précise ; le grill est itér
 
 - **sillon** MCP (lecture seule) : contexte / transcripts / décisions / REX par subject.
 - **Notion** MCP : tickets & epics (`Plan` = instructions, `Type`, critères).
-- Skills **`grill`** (challenge), **`verify`** (gate de fidélité) et **`hunk-review`** (review annotée dans le diff).
+- Skills **`grill`** (challenge), **`verify`** (gate de fidélité), **`hunk-review`** (review annotée dans le diff) et **`distill`** (extraction de patterns vers reference-patterns).
+- **reference-patterns** (`~/Workspace/learning/reference-patterns`) : ma référence de patterns distillés — consultée au Build, alimentée par `distill`.
 - Chaque repo a un **`AGENTS.md`** : Stack · Comment tester · Comment livrer · Flow par type.

@@ -107,7 +107,7 @@ link_file "$DOTFILES/hunk/config.toml"            "$HOME/.config/hunk/config.tom
 link_file "$DOTFILES/git/config"                  "$HOME/.config/git/config"
 link_file "$DOTFILES/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"
 chmod +x "$DOTFILES/claude/statusline-command.sh"
-# CLAUDE.md global (importe claude/GLOBAL.md du repo) + skills (grill/verify/hunk-review/mac-cleanup)
+# CLAUDE.md global (importe claude/GLOBAL.md du repo) + skills (grill/verify/hunk-review/distill/mac-cleanup)
 link_file "$DOTFILES/claude/CLAUDE.md"            "$HOME/.claude/CLAUDE.md"
 link_file "$DOTFILES/claude/skills"               "$HOME/.claude/skills"
 [ -f "$DOTFILES/starship/starship.toml" ] && link_file "$DOTFILES/starship/starship.toml" "$HOME/.config/starship.toml"
