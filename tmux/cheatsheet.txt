@@ -22,6 +22,11 @@
    ▸ SESSIONS  (tmux continue de tourner même fermé)
        préfixe  d           se détacher (revient au shell)
        tmux a               se rattacher    (dans le shell)
+       tmux new -A -s nom   ouvrir la session "nom" (la crée si absente)
+                            ⚠ `tmux new nom` lance nom comme COMMANDE, pas un nom
+       préfixe  Ctrl+s      sauvegarder les sessions maintenant
+       préfixe  Ctrl+r      restaurer les sessions sauvegardées
+                            (auto : sauvegarde /15 min, restauration au reboot)
 
    ▸ OUTILS / DIVERS
        préfixe  g / G       lazygit  (popup / fenêtre)

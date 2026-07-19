@@ -117,6 +117,17 @@ link_file "$DOTFILES/bin/ccw"      "$HOME/.local/bin/ccw"
 link_file "$DOTFILES/bin/zed-open" "$HOME/.local/bin/zed-open"
 chmod +x "$DOTFILES/bin/ccw" "$DOTFILES/bin/zed-open"
 
+# tmux : TPM + plugins (resurrect/continuum) déclarés dans tmux.conf
+say "Installation des plugins tmux (TPM)"
+TPM="$HOME/.tmux/plugins/tpm"
+if [ -d "$TPM" ]; then
+  echo "  déjà     -> $TPM"
+else
+  git clone --depth 1 https://github.com/tmux-plugins/tpm "$TPM"
+fi
+# installe les plugins sans session tmux ouverte
+"$TPM/bin/install_plugins" >/dev/null 2>&1 && echo "  plugins  -> installés" || echo "  plugins  -> à installer via préfixe + I"
+
 # nvim (dossier entier)
 say "Installation de la config neovim (NvChad 2.5)"
 [ -e "$HOME/.config/nvim" ] && mv "$HOME/.config/nvim" "$HOME/.config/nvim.bak.$TS" || true
