@@ -1,0 +1,20 @@
+#!/bin/sh
+# Choisit un commit dans l'historique et l'ouvre dans hunk.
+# `hunk diff` (préfixe h) ne lit que le working tree : une fois commité, il est
+# vide — c'est normal. `hunk show <ref>` prend le relais pour un commit donné,
+# ce script n'y ajoute que le choix du commit.
+# Boucle : quitter hunk ramène à la liste ; Échap sur la liste sort.
+
+git rev-parse --git-dir >/dev/null 2>&1 || {
+  echo "hunk-log : pas un dépôt git ($PWD)" >&2
+  exit 1
+}
+
+while :; do
+  line=$(git log --oneline -n "${HUNK_LOG_COUNT:-100}" 2>/dev/null |
+    fzf --reverse --prompt='commit> ' \
+        --preview 'git show --stat --color=always {1}' \
+        --preview-window=right,55%) || break
+  [ -n "$line" ] || break
+  hunk show "${line%% *}"   # `abc123 message` -> abc123
+done

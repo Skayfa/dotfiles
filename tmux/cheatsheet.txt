@@ -20,6 +20,8 @@
        préfixe  w           vue arborescente fenêtres + sessions
 
    ▸ SESSIONS  (tmux continue de tourner même fermé)
+       préfixe  S           lister les sessions et switcher (popup fzf)
+       préfixe  ( / )       session précédente / suivante
        préfixe  d           se détacher (revient au shell)
        tmux a               se rattacher    (dans le shell)
        tmux new -A -s nom   ouvrir la session "nom" (la crée si absente)
@@ -30,7 +32,11 @@
 
    ▸ OUTILS / DIVERS
        préfixe  g / G       lazygit  (popup / fenêtre)
-       préfixe  h           hunk — review du diff courant (popup)
+       préfixe  h           hunk — review du diff courant, NON commité (popup)
+       préfixe  b           hunk — choisir un commit dans l'historique et le
+                            relire (Échap sort, quitter hunk revient à la liste)
+       préfixe  e           nvim — éditeur du projet courant (fenêtre dédiée,
+                            y saute si elle existe déjà)
        préfixe  D           lazysql — bases de données (popup)
        préfixe  [           mode défilement/copie   (q pour sortir)
        préfixe  r           recharger cette config

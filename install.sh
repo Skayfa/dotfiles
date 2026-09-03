@@ -115,7 +115,8 @@ link_file "$DOTFILES/claude/skills"               "$HOME/.claude/skills"
 # scripts
 link_file "$DOTFILES/bin/ccw"      "$HOME/.local/bin/ccw"
 link_file "$DOTFILES/bin/zed-open" "$HOME/.local/bin/zed-open"
-chmod +x "$DOTFILES/bin/ccw" "$DOTFILES/bin/zed-open"
+link_file "$DOTFILES/bin/hunk-log" "$HOME/.local/bin/hunk-log"
+chmod +x "$DOTFILES/bin/ccw" "$DOTFILES/bin/zed-open" "$DOTFILES/bin/hunk-log"
 
 # tmux : TPM + plugins (resurrect/continuum) déclarés dans tmux.conf
 say "Installation des plugins tmux (TPM)"
