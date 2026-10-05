@@ -81,3 +81,6 @@ node_modules/
 # direnv / brew bundle lock
 .envrc
 Brewfile.lock.json
+
+# Skills synchronisés par Claude Code (pas les nôtres)
+claude/skills/synced/

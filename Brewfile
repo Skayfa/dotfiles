@@ -1,7 +1,8 @@
 # Brewfile — dépendances du setup dev (brew bundle --file=Brewfile)
 
 # Terminal + multiplexer + window manager
-cask "alacritty"
+# alacritty : cask Homebrew désactivé (Gatekeeper, 2026-09-01) → DMG officiel
+# https://github.com/alacritty/alacritty/releases, copié dans /Applications
 brew "tmux"
 cask "hammerspoon"
 
