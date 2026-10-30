@@ -64,7 +64,8 @@ const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY,
 
 // Module state: a reload starts it over.
 let root: string | undefined
-let mrwatch: string[] = []
+let mrwatch: string[] = ['go', 'run', './.agents/skills/babysit-mr-empowill/mrwatch']
+let warming: Promise<void> | undefined
 let panelOn = false
 let slowAt = 0
 let quotaHigh = false
@@ -218,11 +219,27 @@ async function refreshPanel($: EngineInterface, force = false): Promise<void> {
   await update($, snapshot, () => ({ at: t, mrs: mrRows, reviews: reviewRows, bugs: bugRows(t), dew: dewRows, session }))
 }
 
-async function report($: EngineInterface): Promise<string> {
-  await refreshPanel($, true)
+// Everything slow (go build of mrwatch, `task dew` compiling the dolmen CLI, Notion, glab) runs here,
+// in the background: commands answer from what it last read and never wait on it.
+function warm($: EngineInterface): Promise<void> {
+  warming ??= (async () => {
+    if (root && mrwatch[0] === 'go') mrwatch = await buildMrwatch($, root).catch(() => mrwatch)
+    await refreshPanel($, true).catch(() => {})
+  })().finally(() => {
+    warming = undefined
+  })
+  return warming
+}
+
+const LOADING = 'Premier chargement en cours (mrwatch, task dew, Notion, glab : environ une minute la première fois). Retape la commande dans un instant.'
+
+async function report($: EngineInterface): Promise<string | undefined> {
   const s = await read($, snapshot)
+  $.clock.after(1, () => void warm($))
+  if (s.at === 0) return undefined
+  const t = await now($)
   const block = (title: string, rows: PanelRow[]) => [title, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n')
-  return [block('MES MR', s.mrs), block('À RELIRE', s.reviews), block('BUGS DE MES SCOPES (SLO)', s.bugs), block('MON DEW', s.dew), block('SESSION', s.session)].join('\n\n')
+  return [block('MES MR', s.mrs), block('À RELIRE', s.reviews), block('BUGS DE MES SCOPES (SLO)', s.bugs), block('MON DEW', s.dew), block('SESSION', s.session), `(lu il y a ${ago(t - s.at)} ; mise à jour en cours)`].join('\n\n')
 }
 
 // --- commands that hand work to the model ---------------------------------------------------------
@@ -290,7 +307,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     root = await dolmenRoot($, e.cwd).catch(() => undefined)
     if (!root) return next(e) // not a Dolmen session: the mod stays quiet
-    mrwatch = await buildMrwatch($, root).catch(() => ['go', 'run', './.agents/skills/babysit-mr-empowill/mrwatch'])
+    $.clock.after(1, () => void warm($))
     $.clock.every(TICK_MS, () => void tick($))
     for (const [name, description] of COMMANDS) await $.command.register({ name, description }).catch(() => {})
     await $.tool
@@ -384,14 +401,15 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'bugs' }, async $ => {
-    await watchSlow($, true).catch(() => {})
+    $.clock.after(1, () => void warm($))
+    if (!bugs) return { text: LOADING }
     const t = await now($)
     const rows = bugRows(t)
     const lead = scopes.filter(s => s.role === 'Lead').map(s => s.name)
     return { text: [`Bugs ouverts de tes scopes${lead.length ? ` (Lead : ${lead.join(', ')})` : ''}, en jours ouvrés contre le SLO :`, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n') }
   })
 
-  on('command.run', { command: 'etat' }, async $ => ({ text: await report($) }))
+  on('command.run', { command: 'etat' }, async $ => ({ text: (await report($)) ?? LOADING }))
 
   on('command.run', { command: 'veille' }, async ($, e) => {
     const on_ = e.args.trim() !== 'off'
@@ -412,7 +430,7 @@ export const register: Register = on => {
   on('command.run', { command: 'panneau' }, async $ => {
     panelOn = true
     await $.ui.open({ id: PANE, title: 'Dolmen', backgroundColor: 'transparent' })
-    await refreshPanel($, true)
+    $.clock.after(1, () => void warm($))
     return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, Notion et relectures toutes les heures.' }
   })
 
@@ -455,7 +473,7 @@ export const register: Register = on => {
         {s.at > 0 && section('MON DEW', s.dew)}
         {s.at > 0 && section('SESSION', s.session)}
         <Box flexDirection="row" gap={1}>
-          <Button key="refresh" label="Rafraîchir" onPress={() => void refreshPanel($, true)} />
+          <Button key="refresh" label="Rafraîchir" onPress={() => void warm($)} />
           <Button key="next" label="Ticket suivant" onPress={() => void $.command.run({ command: 'ticket', args: '' })} />
           <Button key="note" label="Note d'état sur la MR" onPress={() => handOff($, PROMPTS.note)} />
         </Box>

@@ -99,9 +99,9 @@ test('task test-pkg runs wrapped in a Dolmen session', async ($, on) => {
   expect(seen[0]).toContain('dolmen-ops: full log')
 })
 
-test('/etat ranks the bugs of my scopes by SLO and shows the MRs, the DEW and the quota', async ($, on) => {
+test('/etat answers at once, and from what the background read, ranks the bugs by SLO and shows MRs, DEW and quota', async ($, on) => {
   const base = dolmen({})
-  world(on, {
+  const { clock } = world(on, {
     answer: (argv, body) => {
       const url = argv.find(a => a.startsWith('URL='))?.slice(4) ?? ''
       if (argv[0] === 'git' && argv.includes('user.email')) return { stdout: 'younes.b@empowill.com' }
@@ -117,6 +117,9 @@ test('/etat ranks the bugs of my scopes by SLO and shows the MRs, the DEW and th
     },
   })
   await $.session.start(START)
+  expect((await $.command.run({ command: 'etat', args: '', ...TYPED })).text).toContain('Premier chargement')
+  await clock.advance(10)
+  await clock.settle()
   const out = (await $.command.run({ command: 'etat', args: '', ...TYPED })).text ?? ''
   expect(out).toContain('ET-4236 Autorisation de conduite : Critical · 23 j / 3 j · À TOI')
   expect(out).toContain('ET-4481 Export PDF : High · 2 j / 15 j · personne')
