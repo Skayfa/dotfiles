@@ -254,6 +254,7 @@ export async function myBugs($: EngineInterface, root: string, me: string, scope
     return {
       id: c.id,
       title: c.title,
+      url: c.url,
       status: c.status,
       priority: c.priority,
       createdMs: Date.parse(p.created_time),

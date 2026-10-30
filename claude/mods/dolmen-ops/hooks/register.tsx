@@ -60,7 +60,7 @@ const ARROW = '' // the Powerline separator of the tmux status bar
 
 const EMPTY: PanelSnapshot = { at: 0, mrs: [], reviews: [], bugs: [], dew: [], session: [] }
 // Bump the tag when PanelSnapshot changes: it declines what an older version stored.
-const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-1' })
+const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-2' })
 
 // Module state: a reload starts it over.
 let root: string | undefined
@@ -78,7 +78,7 @@ const readyArmed = new Map<string, number>() // MR iid → until when /pret allo
 let mrs: { mr: MR; d?: Digest }[] = []
 let reviews: MR[] = []
 let bugs: Bug[] | undefined
-let dew: { id: string; title: string; priority: string; complexity: string }[] | undefined
+let dew: { id: string; title: string; priority: string; complexity: string; url: string }[] | undefined
 let me: string | undefined
 let scopes: Scope[] = []
 
@@ -134,7 +134,7 @@ async function watchSlow($: EngineInterface, force = false): Promise<void> {
   me ??= await notionMe($, root)
   if (me && !scopes.length) scopes = await myScopes($, root, me)
   bugs = me ? await myBugs($, root, me, scopes) : undefined
-  dew = (await dewList($, root))?.map(d => ({ id: d.id, title: d.title, priority: d.priority, complexity: d.complexity }))
+  dew = (await dewList($, root))?.map(d => ({ id: d.id, title: d.title, priority: d.priority, complexity: d.complexity, url: d.url }))
   const user = await glabMe($)
   reviews = user ? ((await reviewMRs($, user)) ?? []) : []
 }
@@ -173,6 +173,7 @@ function bugRows(t: number): PanelRow[] {
       const who = b.mine ? 'À TOI' : b.assignees.length ? 'pris' : 'personne'
       return {
         label: `${b.id} ${b.title}`,
+        href: b.url,
         value: `${b.priority || 'sans priorité'} · ${s.age} j${s.limit ? ` / ${s.limit} j` : ''} · ${who}`,
         tone: s.late ? 'error' : !b.priority ? 'warning' : b.mine ? 'warning' : 'subtle',
       }
@@ -217,18 +218,18 @@ async function refreshPanel($: EngineInterface, force = false): Promise<void> {
   const mrRows: PanelRow[] = mrs.length
     ? mrs.flatMap(({ mr, d }) => {
         const v = d ? mrValue(d) : { value: 'mrwatch injoignable (glab auth status ?)', tone: 'subtle' as const }
-        const row: PanelRow = { label: `!${mr.iid} ${mr.tickets.join(' + ') || mr.title}`, ...v }
+        const row: PanelRow = { label: `!${mr.iid} ${mr.tickets.join(' + ') || mr.title}`, href: mr.url, ...v }
         const threads = (d?.threads ?? []).slice(0, 2).map(th => ({ label: `  ${th.author}`, value: th.where || 'fil général', tone: 'subtle' as const }))
         return [row, ...threads]
       })
     : [{ label: '—', value: 'aucune MR ouverte', tone: 'subtle' }]
   const reviewRows: PanelRow[] = reviews.length
-    ? reviews.map(r => ({ label: `!${r.iid} ${r.tickets.join(' + ') || r.title} (${r.author})`, value: `demandée · ${ago(t - Date.parse(r.updatedAt))}`, tone: 'warning' }))
+    ? reviews.map(r => ({ label: `!${r.iid} ${r.tickets.join(' + ') || r.title} (${r.author})`, href: r.url, value: `demandée · ${ago(t - Date.parse(r.updatedAt))}`, tone: 'warning' }))
     : [{ label: '—', value: 'rien à relire', tone: 'subtle' }]
   const dewRows: PanelRow[] = !dew
     ? [{ label: 'task dew', value: 'injoignable', tone: 'subtle' }]
     : dew.length
-      ? dew.slice(0, 6).map(d => ({ label: `${d.id} ${d.title}`, value: `${d.priority} · ${d.complexity}`, tone: d.priority === 'Critical' ? 'error' : undefined }))
+      ? dew.slice(0, 6).map(d => ({ label: `${d.id} ${d.title}`, href: d.url, value: `${d.priority} · ${d.complexity}`, tone: d.priority === 'Critical' ? 'error' : undefined }))
       : [{ label: '—', value: 'aucun ticket Ready', tone: 'subtle' }]
   const session = await sessionRows($)
   await update($, snapshot, () => ({ at: t, mrs: mrRows, reviews: reviewRows, bugs: bugRows(t), dew: dewRows, session }))
@@ -317,6 +318,11 @@ const COMMANDS: [string, string][] = [
   ['menage', 'Dolmen : les worktrees de lots déjà mergés. /menage go les supprime (ccw rm)'],
 ]
 
+// A command whose hook fails says why, instead of « no command.run hook answered it ».
+const failed = (_$: EngineInterface, e: { command: string }, next: { error: { kind: string; message?: string } }) => ({
+  text: `dolmen-ops : /${e.command} a échoué (${next.error.kind}${next.error.message ? ` : ${next.error.message}` : ''}).`,
+})
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     root = await dolmenRoot($, e.cwd).catch(() => undefined)
@@ -363,30 +369,30 @@ export const register: Register = on => {
     if (!root) return { text: 'Pas dans Dolmen.' }
     const ids = ticketIds(e.args)
     if (!ids.length) {
-      const next = (await dewList($, root))?.[0]
+      const next = dew?.[0] ?? (await dewList($, root))?.[0]
       return { text: next ? `Prochain ticket de ton DEW : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}.` : 'Aucun ticket Ready dans ton DEW.' }
     }
     return { text: (await lotOpen($, root, ids, /\bforce\b/.test(e.args))).text }
-  })
+  }).catch(failed)
 
   on('command.run', { command: 'ajouter' }, async ($, e) => {
     const id = ticketIds(e.args)[0]
     if (!root || !id) return { text: 'Usage : /ajouter ET-4481' }
     return { text: await lotAdd($, root, await $.session.cwd(), id, /\bforce\b/.test(e.args)) }
-  })
+  }).catch(failed)
 
   on('command.run', { command: 'detacher' }, async ($, e) => {
     const id = ticketIds(e.args)[0]
     if (!id) return { text: 'Usage : /detacher ET-4481' }
     handOff($, PROMPTS.detacher(id))
     return { text: `L'agent prépare la sortie de ${id} du lot.` }
-  })
+  }).catch(failed)
 
   for (const name of ['plan', 'mr', 'note'] as const) {
     on('command.run', { command: name }, async $ => {
-      void $.prompt.submit({ text: PROMPTS[name] })
+      handOff($, PROMPTS[name])
       return { text: `/${name} : la demande part à l'agent.` }
-    })
+    }).catch(failed)
   }
 
   // Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
@@ -401,20 +407,20 @@ export const register: Register = on => {
     readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
     handOff($, PROMPTS.pret(iid))
     return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅.` }
-  })
+  }).catch(failed)
 
   on('command.run', { command: 'relire' }, async ($, e) => {
     const iid = /\d+/.exec(e.args)?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
     if (!iid) return { text: 'Rien à relire. Usage : /relire 2958' }
     handOff($, PROMPTS.relire(iid))
     return { text: `!${iid} : relecture préparée, rien ne sera posté sans ton OK.` }
-  })
+  }).catch(failed)
 
   on('command.run', { command: 'epic' }, async ($, e) => {
     if (!e.args.trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
     handOff($, PROMPTS.epic(e.args.trim()))
     return { text: 'Découpage de l\'epic demandé à l\'agent. Rien n\'est créé dans Notion sans ton OK.' }
-  })
+  }).catch(failed)
 
   on('command.run', { command: 'bugs' }, async $ => {
     $.clock.after(1, () => void warm($))
@@ -423,9 +429,9 @@ export const register: Register = on => {
     const rows = bugRows(t)
     const lead = scopes.filter(s => s.role === 'Lead').map(s => s.name)
     return { text: [`Bugs ouverts de tes scopes${lead.length ? ` (Lead : ${lead.join(', ')})` : ''}, en jours ouvrés contre le SLO :`, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n') }
-  })
+  }).catch(failed)
 
-  on('command.run', { command: 'etat' }, async $ => ({ text: (await report($)) ?? LOADING }))
+  on('command.run', { command: 'etat' }, async $ => ({ text: (await report($)) ?? LOADING })).catch(failed)
 
   on('command.run', { command: 'menage' }, async ($, e) => {
     if (!root) return { text: 'Pas dans Dolmen.' }
@@ -434,17 +440,17 @@ export const register: Register = on => {
     if (e.args.trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
     if (e.origin.kind !== 'composer') return { text: '/menage go ne s’exécute que tapé par toi.' }
     return { text: (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.' }
-  })
+  }).catch(failed)
 
   on('command.run', { command: 'panneau' }, async $ => {
     panelOn = true
     await $.ui.open({ id: PANE, title: 'Dolmen', backgroundColor: 'transparent' })
     $.clock.after(1, () => void warm($))
     return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, Notion et relectures toutes les heures.' }
-  })
+  }).catch(failed)
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Link } = $.ui.resolve(e)
     panelOn = true // a pane still open after a reload keeps refreshing
     const s = await read($, snapshot)
     void ensureTicker($)
@@ -463,7 +469,7 @@ export const register: Register = on => {
           <Box flexDirection="row" justifyContent="space-between" width={width}>
             <Box flexShrink={1} marginRight={1}>
               <Text wrap="truncate-end" color={r.tone === 'subtle' ? EF.grey : EF.fg}>
-                {r.label}
+                {r.href ? <Link href={r.href}>{r.label}</Link> : r.label}
               </Text>
             </Box>
             <Box flexShrink={0}>

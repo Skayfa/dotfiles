@@ -1,6 +1,6 @@
 // What the dolmen-ops panel draws: one snapshot, refreshed in code and read while drawing.
 export type PanelTone = 'success' | 'warning' | 'error' | 'subtle'
-export type PanelRow = { label: string; value: string; tone?: PanelTone }
+export type PanelRow = { label: string; value: string; tone?: PanelTone; href?: string }
 export type PanelSnapshot = {
   at: number
   mrs: PanelRow[]

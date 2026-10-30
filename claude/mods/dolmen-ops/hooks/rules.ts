@@ -180,7 +180,7 @@ export function workingDays(fromMs: number, toMs: number): number {
   return n
 }
 
-export type Bug = { id: string; title: string; status: string; priority: string; createdMs: number; assignees: string[]; mine: boolean; scopes: string[] }
+export type Bug = { id: string; title: string; url?: string; status: string; priority: string; createdMs: number; assignees: string[]; mine: boolean; scopes: string[] }
 
 export type SloView = { age: number; limit?: number; late: boolean }
 

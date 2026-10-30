@@ -146,3 +146,11 @@ test('/etat answers at once, and from what the background read, ranks the bugs b
   expect(out).toContain('ET-3945 Champs personnalisés : High · Simple')
   expect(out).toContain('Quota semaine : 42 %')
 })
+
+test('/plan hands its prompt to the model once the command has answered', async ($, on) => {
+  const { prompts, clock } = world(on, { answer: dolmen({}) })
+  await $.session.start(START)
+  expect((await $.command.run({ command: 'plan', args: '', ...TYPED })).text).toContain("part à l'agent")
+  await clock.advance(10)
+  expect(prompts[0]).toContain('grill')
+})
