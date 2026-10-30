@@ -146,7 +146,7 @@ flowchart TD
     GLOBAL -. "détaillé dans" .-> WF
 ```
 
-`~/.claude/CLAUDE.md` importe [`claude/GLOBAL.md`](claude/GLOBAL.md) (chargé dans tous les projets). Les skills et settings vivent dans `claude/`. La boucle de travail : [`WORKFLOW.md`](WORKFLOW.md).
+`~/.claude/CLAUDE.md` importe [`claude/GLOBAL.md`](claude/GLOBAL.md) (chargé dans tous les projets). Les skills et settings vivent dans `claude/`. Les mods (plugins de hooks) vivent dans `claude/mods/`, une marketplace locale que `install.sh` installe : `dolmen-ops` pour Dolmen ([README](claude/mods/dolmen-ops/README.md)). La boucle de travail : [`WORKFLOW.md`](WORKFLOW.md).
 
 ---
 
@@ -169,7 +169,7 @@ dotfiles/
 ├── git/                  # config (alias hdiff/hshow ; l'identité reste dans ~/.gitconfig)
 ├── nvim/                 # config NvChad 2.5 complète (lua/…)
 ├── bin/                  # ccw (worktrees) · zed-open (ouvre un chemin dans Zed)
-└── claude/               # CLAUDE.md · GLOBAL.md · settings.json · skills/
+└── claude/               # CLAUDE.md · GLOBAL.md · settings.json · skills/ · mods/
 ```
 
 ---

@@ -142,6 +142,15 @@ for f in aliases plugins; do
   grep -qF "$LINE" "$HOME/.zshrc" 2>/dev/null || printf '\n# setup dev (%s)\n%s\n' "$f" "$LINE" >> "$HOME/.zshrc"
 done
 
+# --- 5. Mods Claude Code (claude/mods : marketplace locale, lue depuis ce dossier) ---
+say "Mods Claude Code (dolmen-ops)"
+if command -v claude >/dev/null 2>&1; then
+  claude plugin marketplace list 2>/dev/null | grep -q 'skayfa' || claude plugin marketplace add "$DOTFILES/claude/mods"
+  claude plugin install dolmen-ops@skayfa --scope user && echo "  mod      -> dolmen-ops (dans une session ouverte : /reload-plugins)"
+else
+  echo "  claude absent : relancer install.sh après l'installation de Claude Code"
+fi
+
 # --- Fin ---
 say "Terminé ✅"
 cat <<EOF

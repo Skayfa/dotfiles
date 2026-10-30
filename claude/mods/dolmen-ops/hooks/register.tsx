@@ -85,6 +85,12 @@ async function now($: EngineInterface) {
 
 const isOn = async ($: EngineInterface) => (await $.store.get('veille')) === true
 
+// A prompt for the model, submitted once the hook that asks for it has returned: a command's hook
+// holds the turn, so a submit from inside it would wait on itself.
+function handOff($: EngineInterface, text: string): void {
+  $.clock.after(1, () => void $.prompt.submit({ text }))
+}
+
 // --- watching -------------------------------------------------------------------------------------
 
 async function watchMRs($: EngineInterface): Promise<void> {
@@ -101,7 +107,7 @@ async function watchMRs($: EngineInterface): Promise<void> {
     if (!waking.length || told.get(mr.iid) === fp) continue
     told.set(mr.iid, fp)
     void $.ui.notify(`!${mr.iid} ${fp}`, { title: TITLE })
-    if (await isOn($)) void $.prompt.submit({ text: babysitPrompt(mr.iid, mr.title, d!) })
+    if (await isOn($)) handOff($, babysitPrompt(mr.iid, mr.title, d!))
   }
   mrs = next
 }
@@ -339,7 +345,7 @@ export const register: Register = on => {
   on('command.run', { command: 'detacher' }, async ($, e) => {
     const id = ticketIds(e.args)[0]
     if (!id) return { text: 'Usage : /detacher ET-4481' }
-    void $.prompt.submit({ text: PROMPTS.detacher(id) })
+    handOff($, PROMPTS.detacher(id))
     return { text: `L'agent prépare la sortie de ${id} du lot.` }
   })
 
@@ -360,20 +366,20 @@ export const register: Register = on => {
       return { text: `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.` }
     }
     readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
-    void $.prompt.submit({ text: PROMPTS.pret(iid) })
+    handOff($, PROMPTS.pret(iid))
     return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅.` }
   })
 
   on('command.run', { command: 'relire' }, async ($, e) => {
     const iid = /\d+/.exec(e.args)?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
     if (!iid) return { text: 'Rien à relire. Usage : /relire 2958' }
-    void $.prompt.submit({ text: PROMPTS.relire(iid) })
+    handOff($, PROMPTS.relire(iid))
     return { text: `!${iid} : relecture préparée, rien ne sera posté sans ton OK.` }
   })
 
   on('command.run', { command: 'epic' }, async ($, e) => {
     if (!e.args.trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
-    void $.prompt.submit({ text: PROMPTS.epic(e.args.trim()) })
+    handOff($, PROMPTS.epic(e.args.trim()))
     return { text: 'Découpage de l\'epic demandé à l\'agent. Rien n\'est créé dans Notion sans ton OK.' }
   })
 
@@ -451,7 +457,7 @@ export const register: Register = on => {
         <Box flexDirection="row" gap={1}>
           <Button key="refresh" label="Rafraîchir" onPress={() => void refreshPanel($, true)} />
           <Button key="next" label="Ticket suivant" onPress={() => void $.command.run({ command: 'ticket', args: '' })} />
-          <Button key="note" label="Note d'état sur la MR" onPress={() => void $.prompt.submit({ text: PROMPTS.note })} />
+          <Button key="note" label="Note d'état sur la MR" onPress={() => handOff($, PROMPTS.note)} />
         </Box>
         {s.at > 0 && <Text color={EF.grey}>{`mis à jour il y a ${ago(t - s.at)}`}</Text>}
       </Box>
