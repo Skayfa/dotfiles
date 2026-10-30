@@ -1,6 +1,6 @@
 // dolmen-ops: the code watches, the model decides. Opens a ticket or a lot of tickets from Notion
 // into a branch and its worktree, watches Younes's MRs with mrwatch and wakes the session on what
-// needs an answer (/veille), keeps the Notion status in step with the MR, ranks the bugs of his
+// needs an answer (a lot's session for its own MR, the Lead session by notification), keeps the Notion status in step with the MR, ranks the bugs of his
 // scopes by SLO, refuses the gestures reserved to the author, trims test output and counts the cost
 // of each lot. Every check is code, so it costs no tokens until something happens.
 import { atom, read, update } from 'claude-code'
@@ -66,6 +66,8 @@ const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY,
 let root: string | undefined
 let mrwatch: string[] = ['go', 'run', './.agents/skills/babysit-mr-empowill/mrwatch']
 let warming: Promise<void> | undefined
+// The lot this session works on (its branch names ET ids), or undefined: the Lead session, on main.
+let lotBranch: string | undefined
 let panelOn = false
 let slowAt = 0
 let quotaHigh = false
@@ -84,7 +86,6 @@ async function now($: EngineInterface) {
   return $.clock.now()
 }
 
-const isOn = async ($: EngineInterface) => (await $.store.get('veille')) === true
 
 // A prompt for the model, submitted once the hook that asks for it has returned: a command's hook
 // holds the turn, so a submit from inside it would wait on itself.
@@ -107,8 +108,9 @@ async function watchMRs($: EngineInterface): Promise<void> {
     const fp = waking.join(' ')
     if (!waking.length || told.get(mr.iid) === fp) continue
     told.set(mr.iid, fp)
-    void $.ui.notify(`!${mr.iid} ${fp}`, { title: TITLE })
-    if (await isOn($)) handOff($, babysitPrompt(mr.iid, mr.title, d!))
+    // A lot's session wakes for its own MR only; the Lead session never wakes, it says where to go.
+    if (lotBranch === mr.branch) handOff($, babysitPrompt(mr.iid, mr.title, d!))
+    else if (!lotBranch) void $.ui.notify(`!${mr.iid} ${fp} → ccw attach ${mr.branch}`, { title: TITLE })
   }
   mrs = next
 }
@@ -139,7 +141,7 @@ async function watchSlow($: EngineInterface, force = false): Promise<void> {
 
 async function tick($: EngineInterface): Promise<void> {
   if (!root) return
-  if (panelOn || (await isOn($))) await watchMRs($).catch(() => {})
+  await watchMRs($).catch(() => {})
   if (panelOn) {
     await watchSlow($).catch(() => {})
     await refreshPanel($).catch(() => {})
@@ -182,7 +184,7 @@ async function sessionRows($: EngineInterface): Promise<PanelRow[]> {
       rows.push({ label: 'Coût du lot', value: [cost !== undefined ? `${cost.toFixed(2)} $` : '', pipelines !== undefined ? `${pipelines} pipelines` : ''].filter(Boolean).join(' · ') })
     }
   }
-  rows.push({ label: 'Veille', value: (await isOn($)) ? 'active : réveille la session' : 'notifie seulement (/veille on)', tone: (await isOn($)) ? 'success' : 'subtle' })
+  rows.push(lotBranch ? { label: 'Rôle', value: 'session de lot : se réveille sur sa MR', tone: 'success' } : { label: 'Rôle', value: 'session Lead : notifie, ne code pas', tone: 'subtle' })
   for (const l of (await $.session.usage()).rateLimits) {
     rows.push({
       label: `Quota ${WINDOWS[l.kind] ?? l.kind.replace('_', ' ')}`,
@@ -299,7 +301,6 @@ const COMMANDS: [string, string][] = [
   ['bugs', 'Dolmen : les bugs de tes scopes, classés par SLO'],
   ['etat', 'Dolmen : MR, relectures, bugs, DEW, coût du lot, quota'],
   ['panneau', 'Dolmen : ouvre le panneau'],
-  ['veille', 'Dolmen : /veille on réveille la session sur les fils et la CI de tes MR ; /veille off notifie seulement'],
   ['menage', 'Dolmen : les worktrees de lots déjà mergés. /menage go les supprime (ccw rm)'],
 ]
 
@@ -307,6 +308,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     root = await dolmenRoot($, e.cwd).catch(() => undefined)
     if (!root) return next(e) // not a Dolmen session: the mod stays quiet
+    const branch = (await gitStatus($, e.cwd).catch(() => undefined))?.branch
+    lotBranch = branch && ticketIds(branch).length ? branch : undefined
     $.clock.after(1, () => void warm($))
     $.clock.every(TICK_MS, () => void tick($))
     for (const [name, description] of COMMANDS) await $.command.register({ name, description }).catch(() => {})
@@ -410,13 +413,6 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'etat' }, async $ => ({ text: (await report($)) ?? LOADING }))
-
-  on('command.run', { command: 'veille' }, async ($, e) => {
-    const on_ = e.args.trim() !== 'off'
-    await $.store.set('veille', on_)
-    if (on_) await watchMRs($).catch(() => {})
-    return { text: on_ ? 'Veille active : un nouveau fil, un conflit ou une CI rouge sur tes MR réveille la session (babysit-mr-empowill).' : 'Veille coupée : notifications seulement.' }
-  })
 
   on('command.run', { command: 'menage' }, async ($, e) => {
     if (!root) return { text: 'Pas dans Dolmen.' }

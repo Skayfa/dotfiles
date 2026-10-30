@@ -25,6 +25,15 @@ Il a besoin de ce que Dolmen utilise déjà :
 - `go`, pour compiler `mrwatch` une fois par session ;
 - `ccw`, qui est dans ces dotfiles.
 
+## Deux sortes de sessions
+
+| Session | Où | Ce qu'elle fait |
+|---|---|---|
+| **Lead** | Le checkout Dolmen, sur `main` | Elle pilote : le panneau, `/etat`, `/bugs`, `/ticket`, `/relire`, `/epic`. Elle ne code pas. Quand une MR reçoit un fil, un conflit ou une CI rouge, elle te notifie avec la commande pour y aller : `ccw attach <branche>` |
+| **Lot** | `ccw new <branche>`, une session par lot | Elle code son lot : `/plan`, `/mr`, `/pret`. Elle se réveille seule sur **sa** MR et passe au babysit. Les autres MR ne la dérangent pas |
+
+C'est la branche de la session qui décide de son rôle : une branche `ET-…` fait une session de lot, tout le reste une session Lead. Il n'y a rien à régler.
+
 ## Commandes
 
 | Commande | Ce qu'elle fait |
@@ -39,8 +48,7 @@ Il a besoin de ce que Dolmen utilise déjà :
 | `/relire [iid]` | Relecture d'une MR d'un collègue avec `review-mr-empowill`. Rien n'est posté sans ton OK |
 | `/epic <lien>` | Propose un découpage en tickets ≤ Medium avec leur Plan. Rien n'est créé sans ton OK |
 | `/bugs` | Les bugs ouverts qui te sont assignés ou qui sont dans les scopes que tu leades ou maintiens, en jours ouvrés contre le SLO (Critical 3, High 15, Low 30) |
-| `/etat`, `/panneau` | Tes MR (pipeline, fils, Draft), les relectures demandées, les bugs, ton DEW, le coût du lot, la veille et le quota |
-| `/veille on` / `off` | Avec `on`, un nouveau fil, un conflit ou une CI rouge sur tes MR réveille la session avec le babysit. Par défaut, le mod notifie seulement |
+| `/etat`, `/panneau` | Tes MR (pipeline, fils, Draft), les relectures demandées, les bugs, ton DEW, le coût du lot, le rôle de la session et le quota |
 | `/menage [go]` | Liste les worktrees de lots déjà dans `main`. `go`, tapé par toi, les supprime avec `ccw rm` (jamais forcé) |
 
 Pour le modèle :
@@ -49,7 +57,7 @@ Pour le modèle :
 
 ## Ce que le code fait tout seul
 
-- **MR, toutes les 2 min** quand le panneau est ouvert ou la veille active. Il lance le digest `mrwatch`, en lecture seule (c'est le babysit qui fait le `-ack`), et ne réveille qu'une fois par changement. Quand une MR ouvre, ses tickets passent de In Progress à « Merge request ».
+- **MR, toutes les 2 min**, avec le digest `mrwatch` en lecture seule (c'est le babysit qui fait le `-ack`). Une seule alerte par changement : la session de lot se réveille, la session Lead notifie. Quand une MR ouvre, ses tickets passent de In Progress à « Merge request ».
 - **Notion et relectures, toutes les heures**, à cause du quota d'API Notion.
 - **Garde-fous** sur les commandes Bash de l'agent :
   - pas de `git add -A` ;

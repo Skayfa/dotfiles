@@ -37,7 +37,11 @@ export function world(on: On, w: World = {}) {
   on('agent.register', (_, e) => ({ value: { agent: `dolmen-ops:${e.name}` } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.notify', () => ({ value: { isSent: true as const, channel: 'terminal_bell' as const } }))
+  const notes: string[] = []
+  on('ui.notify', (_, e) => {
+    notes.push(e.text)
+    return { value: { isSent: true as const, channel: 'terminal_bell' as const } }
+  })
   on('prompt.submit', (_, e) => {
     prompts.push(e.text)
     return { text: e.text }
@@ -57,7 +61,7 @@ export function world(on: On, w: World = {}) {
     const a = w.answer?.(argv, body) ?? {}
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  return { calls, prompts, clock }
+  return { calls, prompts, clock, notes }
 }
 
 export const START = { cwd: ROOT, surface: 'terminal', isInteractive: true } as const

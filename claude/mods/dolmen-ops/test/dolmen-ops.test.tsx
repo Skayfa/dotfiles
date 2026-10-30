@@ -41,20 +41,38 @@ test('/ticket stops before claiming when a Critical would join a lot, unless for
   expect((await $.command.run({ command: 'ticket', args: 'ET-4449 ET-4236 force', ...TYPED })).text).toContain('Lot ET-4449-ET-4236')
 })
 
-test('with /veille on, a new thread wakes the session once, and the tickets move to Merge request', async ($, on) => {
-  const { calls, prompts, clock } = world(on, { answer: dolmen({ 4449: page(4449, 'a', { status: 'In Progress' }), 4481: page(4481, 'b', { status: 'Merge request' }) }) })
-  await $.session.start(START)
-  await $.command.run({ command: 'veille', args: 'on', ...TYPED })
-  await clock.advance(10)
+const LOT = `${HOME}/ET-4449-ET-4481-competences`
+
+// git status answers the lot's branch in its worktree, main elsewhere.
+function withBranch(answer: ReturnType<typeof dolmen>) {
+  return (argv: string[], body: unknown) =>
+    argv.includes('status') ? { stdout: argv.includes(LOT) ? '## ET-4449-ET-4481-competences...origin/ET-4449-ET-4481-competences' : '## main...origin/main' } : answer(argv, body)
+}
+
+test('the session of a lot wakes once on a new thread of its own MR, and its tickets move to Merge request', async ($, on) => {
+  const { calls, prompts, clock, notes } = world(on, { cwd: LOT, answer: withBranch(dolmen({ 4449: page(4449, 'a', { status: 'In Progress' }), 4481: page(4481, 'b', { status: 'Merge request' }) })) })
+  await $.session.start({ ...START, cwd: LOT })
+  await clock.advance(2 * 60_000 + 10)
+  await clock.settle()
   expect(prompts).toHaveLength(1)
   expect(prompts[0]).toContain('!2962')
   expect(prompts[0]).toContain('romain app/x.tsx:3 | encodage ?')
   expect(prompts[0]).toContain('babysit-mr-empowill')
+  expect(notes).toHaveLength(0)
   await clock.advance(2 * 60_000)
   await clock.settle()
   expect(prompts).toHaveLength(1)
   expect(calls.filter(c => c.argv.includes('URL=/v1/pages/page-4449') && c.argv.includes('METHOD=PATCH'))).toHaveLength(1)
   expect(calls.some(c => c.argv.includes('URL=/v1/pages/page-4481'))).toBe(false)
+})
+
+test('the Lead session never wakes: it notifies where to go', async ($, on) => {
+  const { prompts, clock, notes } = world(on, { answer: withBranch(dolmen({})) })
+  await $.session.start(START)
+  await clock.advance(2 * 60_000 + 10)
+  await clock.settle()
+  expect(prompts).toHaveLength(0)
+  expect(notes[0]).toContain('!2962 NEW_NOTES:1:romain → ccw attach ET-4449-ET-4481-competences')
 })
 
 test('leaving Draft is allowed only after a /pret typed by Younes, for that MR', async ($, on) => {
