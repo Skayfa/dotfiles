@@ -250,7 +250,8 @@ export function mrValue(d: Digest): { value: string; tone: 'success' | 'warning'
   if (d.state === 'merged' || d.events.includes('MERGED')) return { value: 'mergée', tone: 'subtle' }
   const parts: string[] = []
   const red = d.pipeline === 'failed' || d.failed.length > 0
-  parts.push(red ? `● rouge${d.failed.length ? ` · ${d.failed.slice(0, 2).join(', ')}` : ''}` : d.pipeline === 'success' ? '● vert' : `● ${d.pipeline ?? '?'}`)
+  const label: Record<string, string> = { success: '● vert', running: '● en cours', pending: '● en attente', canceled: '● annulée', none: 'pas de pipeline' }
+  parts.push(red ? `● rouge${d.failed.length ? ` · ${d.failed.slice(0, 2).join(', ')}` : ''}` : (label[d.pipeline ?? ''] ?? `● ${d.pipeline ?? '?'}`))
   if (d.conflicts) parts.push('conflit')
   if (d.openThreads) parts.push(`${d.openThreads} fil${d.openThreads > 1 ? 's' : ''}`)
   if (d.draft) parts.push('Draft')

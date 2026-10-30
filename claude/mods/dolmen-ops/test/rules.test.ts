@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { branchFor, lotObjection, parseDew, parseDigest, refusal, slo, sortBugs, ticketIds, wakingEvents, workingDays, type Bug } from '../hooks/rules.ts'
+import { branchFor, lotObjection, mrValue, parseDew, parseDigest, refusal, slo, sortBugs, ticketIds, wakingEvents, workingDays, type Bug } from '../hooks/rules.ts'
 
 const DEW = [
   'ET-4236  Critical  -                 Bug       Medium     [Bug] Génération autorisation de conduite  https://app.notion.com/p/a',
@@ -25,6 +25,7 @@ test('the dew list, the mrwatch digest and the ticket ids are read', () => {
   expect(d.threads[0]).toEqual({ author: 'teo.m1', where: 'go/api/syn/users.go:840', body: 'Pourquoi pas ListUsers ici ?' })
   expect(wakingEvents(d)).toEqual(['NEW_NOTES:2:teo.m1,coderabbitai', 'CI_FAILED:lint-go'])
   expect(wakingEvents(parseDigest('GREEN\nstate=opened pipeline=success failed=- conflicts=false draft=true open_threads=0'))).toEqual([])
+  expect(mrValue(parseDigest('state=opened pipeline=none failed=- conflicts=true draft=true open_threads=7')).value).toBe('pas de pipeline · conflit · 7 fils · Draft')
   expect(ticketIds('[ET-4449][et_4481] x ET-4449')).toEqual(['ET-4449', 'ET-4481'])
   expect(branchFor(['ET-4449', 'ET-4481'], '[Compétences] Archiver / exporter !')).toBe('ET-4449-ET-4481-archiver-exporter')
 })
