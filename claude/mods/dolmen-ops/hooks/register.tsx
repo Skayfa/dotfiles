@@ -305,6 +305,12 @@ const failed = (_$: EngineInterface, e: { command: string }, next: { error: { ki
   text: `dolmen-ops : /${e.command} a échoué (${next.error.kind}${next.error.message ? ` : ${next.error.message}` : ''}).`,
 })
 
+// The panel's « Ticket suivant »: a toast with the next ticket of the DEW and the command to take it.
+async function showNext($: EngineInterface): Promise<void> {
+  const next = dew?.[0]
+  $.ui.toast(next ? `Prochain : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}` : 'Aucun ticket Ready dans ton DEW.')
+}
+
 // --- commands -----------------------------------------------------------------------------------
 
 async function cmdPrompt($: EngineInterface, name: 'plan' | 'mr' | 'note'): Promise<CommandRunResult> {
@@ -529,7 +535,7 @@ export const register: Register = on => {
         {s.at > 0 && section('SESSION', s.session)}
         <Box flexDirection="row" gap={1}>
           <Button key="refresh" label="Rafraîchir" onPress={() => void warm($)} />
-          <Button key="next" label="Ticket suivant" onPress={() => void $.command.run({ command: 'ticket', args: '' })} />
+          <Button key="next" label="Ticket suivant" onPress={() => void showNext($)} />
           <Button key="note" label="Note d'état sur la MR" onPress={() => handOff($, PROMPTS.note)} />
         </Box>
         {s.at > 0 && <Text color={EF.grey}>{`mis à jour il y a ${ago(t - s.at)}`}</Text>}
