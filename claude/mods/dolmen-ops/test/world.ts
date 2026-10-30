@@ -13,6 +13,7 @@ export type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 
 export type World = {
   cwd?: string
+  env?: Record<string, string>
   dirs?: Record<string, string[]>
   files?: Record<string, string>
   answer?: (argv: string[], body: unknown) => Answer
@@ -26,7 +27,7 @@ export function world(on: On, w: World = {}) {
   const calls = (w.calls ??= [])
   const prompts = (w.prompts ??= [])
   const files = (w.files ??= { [`${ROOT}/cmd/dolmen/main.go`]: 'package main' })
-  mock.env(on, { HOME: '/w', TMPDIR: '/tmp' })
+  mock.env(on, { HOME: '/w', TMPDIR: '/tmp', ...w.env })
   mock.store(on)
   const clock = mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))

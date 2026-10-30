@@ -27,6 +27,7 @@ test('/ticket opens one lot for two tickets of one scope: claims, branch, ccw wo
   const out = await $.command.run({ command: 'ticket', args: 'ET-4449 ET-4481', ...TYPED })
   expect(out.text).toContain('Lot ET-4449-ET-4481-archiver-une-competence-export-pdf')
   expect(out.text).toContain('ccw new ET-4449-ET-4481')
+  expect(ran(calls, 'tmux', 'new-window')).toBe(false)
   expect(ran(calls, 'task', 'dew-claim', 'ID=ET-4449')).toBe(true)
   expect(ran(calls, 'task', 'dew-claim', 'ID=ET-4481')).toBe(true)
   expect(calls.some(c => c.argv.includes('worktree') && c.argv.includes('--no-track') && c.argv.some(a => a.startsWith(`${HOME}/ET-4449-ET-4481`)))).toBe(true)
@@ -153,4 +154,12 @@ test('/plan hands its prompt to the model once the command has answered', async 
   expect((await $.command.run({ command: 'plan', args: '', ...TYPED })).text).toContain("part à l'agent")
   await clock.advance(10)
   expect(prompts[0]).toContain('grill')
+})
+
+test('inside tmux, /ticket opens the lot session in a window beside this one', async ($, on) => {
+  const { calls } = world(on, { env: { TMUX: '/tmp/tmux-501/default,1,0' }, answer: dolmen({ 4236: page(4236, 'Autorisation de conduite', { priority: 'Critical' }) }) })
+  await $.session.start(START)
+  const out = await $.command.run({ command: 'ticket', args: 'ET-4236', ...TYPED })
+  expect(out.text).toContain('fenêtre tmux « ET-4236 »')
+  expect(calls.some(c => c.argv.join(' ') === `tmux new-window -d -n ET-4236 -c ${HOME}/ET-4236-autorisation-de-conduite claude`)).toBe(true)
 })

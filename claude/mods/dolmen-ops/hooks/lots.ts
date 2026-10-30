@@ -29,13 +29,13 @@ export async function lotOpen($: EngineInterface, root: string, wanted: string[]
   await sh($, ['git', '-C', root, 'fetch', 'origin', 'main'])
   const wt = await sh($, ['git', '-C', root, 'worktree', 'add', '--no-track', '-b', branch, path, 'origin/main'])
   if (!wt.ok) return { text: `Tickets pris (${claimed.join(', ')}), mais le worktree n'a pas été créé : ${wt.err}` }
+  const window = await openWindow($, cards.map(c => c.id).join('+'), path)
   return {
     branch,
     text: [
       `Lot ${branch} : ${cards.map(c => `${c.id} ${c.title}`).join(' · ')}`,
       `In Progress dans Notion, worktree ${path} depuis origin/main.`,
-      `Session dédiée : ccw new ${branch}   (ou continue ici, cd ${path})`,
-      'Ensuite : /plan.',
+      window ? `Session du lot : fenêtre tmux « ${window} », Claude lancé dedans. Tapes-y /plan.` : `Session du lot : ccw new ${branch}, puis /plan.`,
     ].join('\n'),
   }
 }
@@ -56,6 +56,14 @@ export async function lotAdd($: EngineInterface, root: string, dir: string, id: 
   const claim = await dewClaim($, root, id)
   if (!claim.ok && !/already In Progress/.test(claim.out + claim.err)) return `${id} : ${claim.err || claim.out}`
   return `${id} pris et ajouté à ${branch}. Titre de la MR : ajoute [${id}] ; section « Link to Notion ticket » : ajoute ${add.url}.`
+}
+
+// The lot's session: a tmux window beside this one, Claude running in the worktree. Focus stays here.
+// Outside tmux there is nothing to open; the caller then names `ccw new`.
+async function openWindow($: EngineInterface, name: string, path: string): Promise<string | undefined> {
+  if (!(await $.env.get('TMUX'))) return undefined
+  const r = await sh($, ['tmux', 'new-window', '-d', '-n', name, '-c', path, 'claude'])
+  return r.ok ? name : undefined
 }
 
 export type Sweep = { done: { dir: string; name: string }[]; dirty: string[] }

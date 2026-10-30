@@ -38,7 +38,7 @@ C'est la branche de la session qui décide de son rôle : une branche `ET-…` f
 
 | Commande | Ce qu'elle fait |
 |---|---|
-| `/ticket [ET-… …] [force]` | Sans argument : le prochain ticket de ton DEW. Avec des ids : prend les tickets (`task dew-claim`) et crée **un** lot, avec la branche `ET-4449-ET-4481-<slug>` depuis `origin/main` dans le worktree de `ccw` (`../dolmen-worktrees/<branche>`). Rien n'est poussé. Ensuite : `ccw new <branche>` |
+| `/ticket [ET-… …] [force]` | Sans argument : le prochain ticket de ton DEW. Avec des ids : prend les tickets (`task dew-claim`) et crée **un** lot, avec la branche `ET-4449-ET-4481-<slug>` depuis `origin/main` dans le worktree de `ccw` (`../dolmen-worktrees/<branche>`). Rien n’est poussé. Dans tmux, ouvre la session du lot dans une fenêtre à côté (Claude lancé dans le worktree) ; sinon, `ccw new <branche>` |
 | `/ajouter ET-…` | Ajoute un ticket au lot de ce worktree. La branche garde son nom ; l'id va dans le titre de la MR et dans sa section ticket |
 | `/detacher ET-…` | L'agent sort le ticket vers sa propre branche (cherry-pick, puis un revert dans le lot), sans réécrire ce qui est poussé |
 | `/plan` | Skill `grill`, contrôles readiness (`auth:`, profil, route, données showcase), puis le test plan « En tant que … → … ». Rien n'est écrit dans Notion sans ton OK |
