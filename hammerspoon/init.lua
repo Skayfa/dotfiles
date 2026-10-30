@@ -3,8 +3,8 @@
 
 -- Settings.
 local appName = "Alacritty"
-local widthFraction = 0.90 -- drop-down width, as a fraction of the screen width
-local heightFraction = 0.90 -- drop-down height, as a fraction of the screen height
+local widthFraction = 0.95 -- drop-down width, as a fraction of the screen width
+local heightFraction = 1.0 -- drop-down height, as a fraction of the screen height
 
 -- Screen the drop-down should appear on (the one under the mouse).
 local function dropScreen()

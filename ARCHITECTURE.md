@@ -51,7 +51,7 @@ flowchart TD
 | `Shift+Entrée`                 | Alacritty                            | saut de ligne (saisie multi-ligne Claude Code)                  |
 | `Cmd+Shift+clic` sur un chemin | Alacritty `[hints]` → `bin/zed-open` | ouvre le fichier dans **Zed** (résout `~`, le cwd du pane tmux) |
 | `Cmd+Shift+clic` sur une URL   | Alacritty `[hints]`                  | ouvre dans le navigateur                                        |
-| `Ctrl+Alt+T`                   | Hammerspoon                          | **dropdown** Alacritty (90% écran)                              |
+| `Ctrl+Alt+T`                   | Hammerspoon                          | **dropdown** Alacritty (pleine hauteur, marges latérales)       |
 | préfixe `g` / `G`              | tmux popup                           | **lazygit** (popup / fenêtre)                                   |
 | préfixe `h` / `hd`             | tmux popup / zsh                     | **hunk** — review du changeset (Claude y annote inline)         |
 | `git hdiff` / `git hshow`      | git (alias `~/.config/git/config`)   | diff / commit via **hunk** (le pager par défaut reste intact)   |

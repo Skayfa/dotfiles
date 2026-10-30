@@ -1,5 +1,7 @@
 [window]
 padding = { x = 10, y = 10 }
+# Spread the leftover pixels evenly around the grid instead of piling them right and bottom
+dynamic_padding = true
 decorations = "none"
 # Les DEUX Options = Alt : ⌥←/→ saute un mot et ⌥flèches change de pane, des deux côtés.
 # Contrepartie : Option ne compose plus les caractères macOS (~ [ ] { } | en AZERTY).
