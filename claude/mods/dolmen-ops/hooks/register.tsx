@@ -4,7 +4,7 @@
 // scopes by SLO, refuses the gestures reserved to the author, trims test output and counts the cost
 // of each lot. Every check is code, so it costs no tokens until something happens.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { CommandRunInput, CommandRunResult, EngineInterface, Register } from 'claude-code'
 import type { PanelRow, PanelSnapshot } from '../types'
 import {
   buildMrwatch,
@@ -300,6 +300,97 @@ async function here($: EngineInterface): Promise<{ cwd: string; branch?: string;
   return { cwd, branch, iid: mrs.find(m => m.mr.branch === branch)?.mr.iid }
 }
 
+// A command whose hook fails says why, instead of « no command.run hook answered it ».
+const failed = (_$: EngineInterface, e: { command: string }, next: { error: { kind: string; message?: string } }) => ({
+  text: `dolmen-ops : /${e.command} a échoué (${next.error.kind}${next.error.message ? ` : ${next.error.message}` : ''}).`,
+})
+
+// --- commands -----------------------------------------------------------------------------------
+
+async function cmdPrompt($: EngineInterface, name: 'plan' | 'mr' | 'note'): Promise<CommandRunResult> {
+  handOff($, PROMPTS[name])
+  return { text: `/${name} : la demande part à l'agent.` }
+}
+
+async function cmdTicket($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  if (!root) return { text: 'Pas dans Dolmen.' }
+  const ids = ticketIds((e.args ?? ""))
+  if (!ids.length) {
+    const next = dew?.[0] ?? (await dewList($, root))?.[0]
+    return { text: next ? `Prochain ticket de ton DEW : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}.` : 'Aucun ticket Ready dans ton DEW.' }
+  }
+  return { text: (await lotOpen($, root, ids, /\bforce\b/.test((e.args ?? "")))).text }
+}
+
+async function cmdAjouter($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  const id = ticketIds((e.args ?? ""))[0]
+  if (!root || !id) return { text: 'Usage : /ajouter ET-4481' }
+  return { text: await lotAdd($, root, await $.session.cwd(), id, /\bforce\b/.test((e.args ?? ""))) }
+}
+
+async function cmdDetacher($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  const id = ticketIds((e.args ?? ""))[0]
+  if (!id) return { text: 'Usage : /detacher ET-4481' }
+  handOff($, PROMPTS.detacher(id))
+  return { text: `L'agent prépare la sortie de ${id} du lot.` }
+}
+
+// Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
+async function cmdPret($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  if (e.origin.kind !== 'composer') return { text: '/pret ne s’exécute que tapé par toi.' }
+  const iid = Number(/\d+/.exec((e.args ?? ""))?.[0]) || (await here($)).iid
+  if (!iid || !root) return { text: 'Aucune MR pour cette branche. Usage : /pret 2961' }
+  const d = await digest($, root, mrwatch, iid)
+  if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) {
+    return { text: `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.` }
+  }
+  readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
+  handOff($, PROMPTS.pret(iid))
+  return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅.` }
+}
+
+async function cmdRelire($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  const iid = /\d+/.exec((e.args ?? ""))?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
+  if (!iid) return { text: 'Rien à relire. Usage : /relire 2958' }
+  handOff($, PROMPTS.relire(iid))
+  return { text: `!${iid} : relecture préparée, rien ne sera posté sans ton OK.` }
+}
+
+async function cmdEpic($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  if (!(e.args ?? "").trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
+  handOff($, PROMPTS.epic((e.args ?? "").trim()))
+  return { text: 'Découpage de l\'epic demandé à l\'agent. Rien n\'est créé dans Notion sans ton OK.' }
+}
+
+async function cmdBugs($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  $.clock.after(1, () => void warm($))
+  if (!bugs) return { text: LOADING }
+  const t = await now($)
+  const rows = bugRows(t)
+  const lead = scopes.filter(s => s.role === 'Lead').map(s => s.name)
+  return { text: [`Bugs ouverts de tes scopes${lead.length ? ` (Lead : ${lead.join(', ')})` : ''}, en jours ouvrés contre le SLO :`, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n') }
+}
+
+async function cmdEtat($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  return { text: (await report($)) ?? LOADING }
+}
+
+async function cmdMenage($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  if (!root) return { text: 'Pas dans Dolmen.' }
+  const s = await sweep($, root)
+  const lines = [...s.done.map(l => `mergé, propre : ${l.name}`), ...s.dirty.map(n => `mergé mais modifié (gardé) : ${n}`)]
+  if ((e.args ?? "").trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
+  if (e.origin.kind !== 'composer') return { text: '/menage go ne s’exécute que tapé par toi.' }
+  return { text: (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.' }
+}
+
+async function cmdPanneau($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
+  panelOn = true
+  await $.ui.open({ id: PANE, title: 'Dolmen', backgroundColor: 'transparent' })
+  $.clock.after(1, () => void warm($))
+  return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, Notion et relectures toutes les heures.' }
+}
+
 // --- registration ---------------------------------------------------------------------------------
 
 const COMMANDS: [string, string][] = [
@@ -317,11 +408,6 @@ const COMMANDS: [string, string][] = [
   ['panneau', 'Dolmen : ouvre le panneau'],
   ['menage', 'Dolmen : les worktrees de lots déjà mergés. /menage go les supprime (ccw rm)'],
 ]
-
-// A command whose hook fails says why, instead of « no command.run hook answered it ».
-const failed = (_$: EngineInterface, e: { command: string }, next: { error: { kind: string; message?: string } }) => ({
-  text: `dolmen-ops : /${e.command} a échoué (${next.error.kind}${next.error.message ? ` : ${next.error.message}` : ''}).`,
-})
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -365,89 +451,40 @@ export const register: Register = on => {
     return c ? { result: cardText(c) } : { deny: `${id}: not found in Notion (NOTION_TOKEN in ~/.dolmen/.envprivate?).` }
   })
 
-  on('command.run', { command: 'ticket' }, async ($, e) => {
-    if (!root) return { text: 'Pas dans Dolmen.' }
-    const ids = ticketIds((e.args ?? ""))
-    if (!ids.length) {
-      const next = dew?.[0] ?? (await dewList($, root))?.[0]
-      return { text: next ? `Prochain ticket de ton DEW : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}.` : 'Aucun ticket Ready dans ton DEW.' }
+  // One hook serves every command. With one matcher hook per command, a live session answered only
+  // /panneau, the module's last one; /etat and /ticket went unanswered (the tests did not show it).
+  on('command.run', async ($, e, next) => {
+    switch (e.command.replace(/^dolmen-ops:/, '')) {
+      case 'plan':
+        return cmdPrompt($, 'plan')
+      case 'mr':
+        return cmdPrompt($, 'mr')
+      case 'note':
+        return cmdPrompt($, 'note')
+      case 'ticket':
+        return cmdTicket($, e)
+      case 'ajouter':
+        return cmdAjouter($, e)
+      case 'detacher':
+        return cmdDetacher($, e)
+      case 'pret':
+        return cmdPret($, e)
+      case 'relire':
+        return cmdRelire($, e)
+      case 'epic':
+        return cmdEpic($, e)
+      case 'bugs':
+        return cmdBugs($, e)
+      case 'etat':
+        return cmdEtat($, e)
+      case 'menage':
+        return cmdMenage($, e)
+      case 'panneau':
+        return cmdPanneau($, e)
+      default:
+        return next(e)
     }
-    return { text: (await lotOpen($, root, ids, /\bforce\b/.test((e.args ?? "")))).text }
-  }).catch(failed)
-
-  on('command.run', { command: 'ajouter' }, async ($, e) => {
-    const id = ticketIds((e.args ?? ""))[0]
-    if (!root || !id) return { text: 'Usage : /ajouter ET-4481' }
-    return { text: await lotAdd($, root, await $.session.cwd(), id, /\bforce\b/.test((e.args ?? ""))) }
-  }).catch(failed)
-
-  on('command.run', { command: 'detacher' }, async ($, e) => {
-    const id = ticketIds((e.args ?? ""))[0]
-    if (!id) return { text: 'Usage : /detacher ET-4481' }
-    handOff($, PROMPTS.detacher(id))
-    return { text: `L'agent prépare la sortie de ${id} du lot.` }
-  }).catch(failed)
-
-  for (const name of ['plan', 'mr', 'note'] as const) {
-    on('command.run', { command: name }, async $ => {
-      handOff($, PROMPTS[name])
-      return { text: `/${name} : la demande part à l'agent.` }
-    }).catch(failed)
-  }
-
-  // Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
-  on('command.run', { command: 'pret' }, async ($, e) => {
-    if (e.origin.kind !== 'composer') return { text: '/pret ne s’exécute que tapé par toi.' }
-    const iid = Number(/\d+/.exec((e.args ?? ""))?.[0]) || (await here($)).iid
-    if (!iid || !root) return { text: 'Aucune MR pour cette branche. Usage : /pret 2961' }
-    const d = await digest($, root, mrwatch, iid)
-    if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) {
-      return { text: `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.` }
-    }
-    readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
-    handOff($, PROMPTS.pret(iid))
-    return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅.` }
-  }).catch(failed)
-
-  on('command.run', { command: 'relire' }, async ($, e) => {
-    const iid = /\d+/.exec((e.args ?? ""))?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
-    if (!iid) return { text: 'Rien à relire. Usage : /relire 2958' }
-    handOff($, PROMPTS.relire(iid))
-    return { text: `!${iid} : relecture préparée, rien ne sera posté sans ton OK.` }
-  }).catch(failed)
-
-  on('command.run', { command: 'epic' }, async ($, e) => {
-    if (!(e.args ?? "").trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
-    handOff($, PROMPTS.epic((e.args ?? "").trim()))
-    return { text: 'Découpage de l\'epic demandé à l\'agent. Rien n\'est créé dans Notion sans ton OK.' }
-  }).catch(failed)
-
-  on('command.run', { command: 'bugs' }, async $ => {
-    $.clock.after(1, () => void warm($))
-    if (!bugs) return { text: LOADING }
-    const t = await now($)
-    const rows = bugRows(t)
-    const lead = scopes.filter(s => s.role === 'Lead').map(s => s.name)
-    return { text: [`Bugs ouverts de tes scopes${lead.length ? ` (Lead : ${lead.join(', ')})` : ''}, en jours ouvrés contre le SLO :`, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n') }
-  }).catch(failed)
-
-  on('command.run', { command: 'etat' }, async $ => ({ text: (await report($)) ?? LOADING })).catch(failed)
-
-  on('command.run', { command: 'menage' }, async ($, e) => {
-    if (!root) return { text: 'Pas dans Dolmen.' }
-    const s = await sweep($, root)
-    const lines = [...s.done.map(l => `mergé, propre : ${l.name}`), ...s.dirty.map(n => `mergé mais modifié (gardé) : ${n}`)]
-    if ((e.args ?? "").trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
-    if (e.origin.kind !== 'composer') return { text: '/menage go ne s’exécute que tapé par toi.' }
-    return { text: (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.' }
-  }).catch(failed)
-
-  on('command.run', { command: 'panneau' }, async $ => {
-    panelOn = true
-    await $.ui.open({ id: PANE, title: 'Dolmen', backgroundColor: 'transparent' })
-    $.clock.after(1, () => void warm($))
-    return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, Notion et relectures toutes les heures.' }
-  }).catch(failed)
+  }).catch(($, e, next) => (next.called ? next(e) : failed($, e, next)))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Link } = $.ui.resolve(e)
