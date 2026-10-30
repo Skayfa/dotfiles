@@ -434,6 +434,8 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     panelOn = true // a pane still open after a reload keeps refreshing
     const s = await read($, snapshot)
+    // An empty snapshot after a /clear or a reload: redraw from what is in memory, then read anew.
+    if (s.at === 0) $.clock.after(1, () => void (mrs.length || bugs || dew ? refreshPanel($) : warm($)))
     const width = Math.max(20, e.props.bodyColumns)
     const section = (title: string, rows: PanelRow[]) => (
       <Box flexDirection="column" marginBottom={1} width={width}>
@@ -506,6 +508,12 @@ export const register: Register = on => {
       await $.store.set('cost', cost)
     }
     return done
+  })
+
+  // A /clear starts a new conversation and an empty panel state; the reads in memory still hold.
+  on('session.end', ($, e, next) => {
+    if (root && e.reason === 'clear' && panelOn) $.clock.after(1, () => void refreshPanel($))
+    return next(e)
   })
 
   on('session.measure', ($, e, next) => {
