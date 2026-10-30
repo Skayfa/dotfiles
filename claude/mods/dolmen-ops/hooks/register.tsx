@@ -367,22 +367,22 @@ export const register: Register = on => {
 
   on('command.run', { command: 'ticket' }, async ($, e) => {
     if (!root) return { text: 'Pas dans Dolmen.' }
-    const ids = ticketIds(e.args)
+    const ids = ticketIds((e.args ?? ""))
     if (!ids.length) {
       const next = dew?.[0] ?? (await dewList($, root))?.[0]
       return { text: next ? `Prochain ticket de ton DEW : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}.` : 'Aucun ticket Ready dans ton DEW.' }
     }
-    return { text: (await lotOpen($, root, ids, /\bforce\b/.test(e.args))).text }
+    return { text: (await lotOpen($, root, ids, /\bforce\b/.test((e.args ?? "")))).text }
   }).catch(failed)
 
   on('command.run', { command: 'ajouter' }, async ($, e) => {
-    const id = ticketIds(e.args)[0]
+    const id = ticketIds((e.args ?? ""))[0]
     if (!root || !id) return { text: 'Usage : /ajouter ET-4481' }
-    return { text: await lotAdd($, root, await $.session.cwd(), id, /\bforce\b/.test(e.args)) }
+    return { text: await lotAdd($, root, await $.session.cwd(), id, /\bforce\b/.test((e.args ?? ""))) }
   }).catch(failed)
 
   on('command.run', { command: 'detacher' }, async ($, e) => {
-    const id = ticketIds(e.args)[0]
+    const id = ticketIds((e.args ?? ""))[0]
     if (!id) return { text: 'Usage : /detacher ET-4481' }
     handOff($, PROMPTS.detacher(id))
     return { text: `L'agent prépare la sortie de ${id} du lot.` }
@@ -398,7 +398,7 @@ export const register: Register = on => {
   // Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
   on('command.run', { command: 'pret' }, async ($, e) => {
     if (e.origin.kind !== 'composer') return { text: '/pret ne s’exécute que tapé par toi.' }
-    const iid = Number(/\d+/.exec(e.args)?.[0]) || (await here($)).iid
+    const iid = Number(/\d+/.exec((e.args ?? ""))?.[0]) || (await here($)).iid
     if (!iid || !root) return { text: 'Aucune MR pour cette branche. Usage : /pret 2961' }
     const d = await digest($, root, mrwatch, iid)
     if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) {
@@ -410,15 +410,15 @@ export const register: Register = on => {
   }).catch(failed)
 
   on('command.run', { command: 'relire' }, async ($, e) => {
-    const iid = /\d+/.exec(e.args)?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
+    const iid = /\d+/.exec((e.args ?? ""))?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
     if (!iid) return { text: 'Rien à relire. Usage : /relire 2958' }
     handOff($, PROMPTS.relire(iid))
     return { text: `!${iid} : relecture préparée, rien ne sera posté sans ton OK.` }
   }).catch(failed)
 
   on('command.run', { command: 'epic' }, async ($, e) => {
-    if (!e.args.trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
-    handOff($, PROMPTS.epic(e.args.trim()))
+    if (!(e.args ?? "").trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
+    handOff($, PROMPTS.epic((e.args ?? "").trim()))
     return { text: 'Découpage de l\'epic demandé à l\'agent. Rien n\'est créé dans Notion sans ton OK.' }
   }).catch(failed)
 
@@ -437,7 +437,7 @@ export const register: Register = on => {
     if (!root) return { text: 'Pas dans Dolmen.' }
     const s = await sweep($, root)
     const lines = [...s.done.map(l => `mergé, propre : ${l.name}`), ...s.dirty.map(n => `mergé mais modifié (gardé) : ${n}`)]
-    if (e.args.trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
+    if ((e.args ?? "").trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
     if (e.origin.kind !== 'composer') return { text: '/menage go ne s’exécute que tapé par toi.' }
     return { text: (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.' }
   }).catch(failed)
