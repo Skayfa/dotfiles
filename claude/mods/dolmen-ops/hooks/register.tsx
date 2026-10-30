@@ -139,8 +139,21 @@ async function watchSlow($: EngineInterface, force = false): Promise<void> {
   reviews = user ? ((await reviewMRs($, user)) ?? []) : []
 }
 
+// The ticker. A /clear ends the session's timers with it (no session.start follows), so every hook
+// that runs after one re-arms it when its last tick is too old.
+let lastTick = 0
+let stopTicker: (() => void) | undefined
+
+async function ensureTicker($: EngineInterface): Promise<void> {
+  if (!root || (await now($)) - lastTick < 2 * TICK_MS) return
+  stopTicker?.()
+  stopTicker = $.clock.every(TICK_MS, () => void tick($))
+  lastTick = await now($)
+}
+
 async function tick($: EngineInterface): Promise<void> {
   if (!root) return
+  lastTick = await now($)
   await watchMRs($).catch(() => {})
   if (panelOn) {
     await watchSlow($).catch(() => {})
@@ -311,7 +324,7 @@ export const register: Register = on => {
     const branch = (await gitStatus($, e.cwd).catch(() => undefined))?.branch
     lotBranch = branch && ticketIds(branch).length ? branch : undefined
     $.clock.after(1, () => void warm($))
-    $.clock.every(TICK_MS, () => void tick($))
+    await ensureTicker($)
     for (const [name, description] of COMMANDS) await $.command.register({ name, description }).catch(() => {})
     await $.tool
       .register({
@@ -434,6 +447,7 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     panelOn = true // a pane still open after a reload keeps refreshing
     const s = await read($, snapshot)
+    void ensureTicker($)
     // An empty snapshot after a /clear or a reload: redraw from what is in memory, then read anew.
     if (s.at === 0) $.clock.after(1, () => void (mrs.length || bugs || dew ? refreshPanel($) : warm($)))
     const width = Math.max(20, e.props.bodyColumns)
@@ -512,7 +526,10 @@ export const register: Register = on => {
 
   // A /clear starts a new conversation and an empty panel state; the reads in memory still hold.
   on('session.end', ($, e, next) => {
-    if (root && e.reason === 'clear' && panelOn) $.clock.after(1, () => void refreshPanel($))
+    if (root && e.reason === 'clear') {
+      lastTick = 0
+      $.clock.after(1, () => void (ensureTicker($), panelOn && refreshPanel($)))
+    }
     return next(e)
   })
 
@@ -531,6 +548,7 @@ export const register: Register = on => {
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     if (!root) return composed
+    void ensureTicker($)
     const extra = [{ id: 'dolmen-ops:models', text: MODELS_SECTION, scope: 'session' as const }]
     if (quotaHigh) extra.push({ id: 'dolmen-ops:handoff', text: HANDOFF_SECTION, scope: 'session' as const })
     return { sections: [...composed.sections, ...extra] }
