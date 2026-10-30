@@ -148,18 +148,40 @@ test('/etat answers at once, and from what the background read, ranks the bugs b
   expect(out).toContain('Quota semaine : 42 %')
 })
 
-test('/plan hands its prompt to the model once the command has answered', async ($, on) => {
-  const { prompts, clock } = world(on, { answer: dolmen({}) })
-  await $.session.start(START)
+test('in a lot session, /plan hands its prompt to the model once the command has answered', async ($, on) => {
+  const { prompts, clock } = world(on, { cwd: LOT, answer: withBranch(dolmen({})) })
+  await $.session.start({ ...START, cwd: LOT })
   expect((await $.command.run({ command: 'plan', args: '', ...TYPED })).text).toContain("part à l'agent")
   await clock.advance(10)
   expect(prompts[0]).toContain('grill')
 })
 
-test('inside tmux, /ticket opens the lot session in a window beside this one', async ($, on) => {
-  const { calls } = world(on, { env: { TMUX: '/tmp/tmux-501/default,1,0' }, answer: dolmen({ 4236: page(4236, 'Autorisation de conduite', { priority: 'Critical' }) }) })
+test('from the Lead, /plan starts the lot agent in its worktree with the lot brief', async ($, on) => {
+  const { prompts, clock, spawned } = world(on, { dirs: { [HOME]: ['ET-4449-ET-4481-competences'] }, answer: withBranch(dolmen({})) })
   await $.session.start(START)
-  const out = await $.command.run({ command: 'ticket', args: 'ET-4236', ...TYPED })
-  expect(out.text).toContain('fenêtre tmux « ET-4236 »')
-  expect(calls.some(c => c.argv.join(' ') === `tmux new-window -d -n ET-4236 -c ${HOME}/ET-4236-autorisation-de-conduite claude`)).toBe(true)
+  expect((await $.command.run({ command: 'plan', args: 'ET-4481', ...TYPED })).text).toContain('Agent du lot ET-4449-ET-4481-competences démarré')
+  await clock.advance(10)
+  await clock.settle()
+  expect(spawned).toHaveLength(1)
+  expect(spawned[0]!.cwd).toBe(LOT)
+  expect(spawned[0]!.prompt).toContain('uniquement dans ' + LOT)
+  expect(spawned[0]!.prompt).toContain('grill')
+  expect(prompts).toHaveLength(0)
+})
+
+test('from the Lead, a lot with an agent gets its commands and its MR events, and shows in Lots en cours', async ($, on) => {
+  // The id the engine returned when it started the lot's agent (a test's spawn starts none).
+  const { clock, sent, notes } = world(on, { agents: [{ id: 'ag-1', status: 'idle' }], store: { lotAgents: { 'ET-4449-ET-4481-competences': 'ag-1' } }, dirs: { [HOME]: ['ET-4449-ET-4481-competences'] }, answer: withBranch(dolmen({})) })
+  await $.session.start(START)
+  expect((await $.command.run({ command: 'note', args: '', ...TYPED })).text).toContain('→ agent du lot')
+  expect(sent.at(-1)?.text).toContain('État')
+  await clock.advance(2 * 60_000)
+  await clock.settle()
+  expect(sent.some(m => m.text.includes('!2962') && m.text.includes('babysit-mr-empowill'))).toBe(true)
+  expect(notes).toHaveLength(0)
+  await $.command.run({ command: 'etat', args: '', ...TYPED })
+  await clock.advance(10)
+  await clock.settle()
+  const etat = (await $.command.run({ command: 'etat', args: '', ...TYPED })).text ?? ''
+  expect(etat).toContain('ET-4449-ET-4481-competences : agent : attend ta réponse · !2962')
 })

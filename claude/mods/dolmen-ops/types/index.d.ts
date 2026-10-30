@@ -3,6 +3,7 @@ export type PanelTone = 'success' | 'warning' | 'error' | 'subtle'
 export type PanelRow = { label: string; value: string; tone?: PanelTone; href?: string }
 export type PanelSnapshot = {
   at: number
+  lots: PanelRow[]
   mrs: PanelRow[]
   reviews: PanelRow[]
   bugs: PanelRow[]

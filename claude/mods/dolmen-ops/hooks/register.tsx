@@ -15,6 +15,7 @@ import {
   findTicket,
   gitStatus,
   glabMe,
+  lotDirs,
   myBugs,
   myMRs,
   myScopes,
@@ -58,9 +59,9 @@ const EF = { bg: '#2d353b', fg: '#d3c6aa', grey: '#859289', green: '#a7c080', ye
 const TONE = { success: EF.green, warning: EF.yellow, error: EF.red, subtle: EF.grey } as const
 const ARROW = '' // the Powerline separator of the tmux status bar
 
-const EMPTY: PanelSnapshot = { at: 0, mrs: [], reviews: [], bugs: [], dew: [], session: [] }
+const EMPTY: PanelSnapshot = { at: 0, lots: [], mrs: [], reviews: [], bugs: [], dew: [], session: [] }
 // Bump the tag when PanelSnapshot changes: it declines what an older version stored.
-const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-2' })
+const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-3' })
 
 // Module state: a reload starts it over.
 let root: string | undefined
@@ -109,7 +110,9 @@ async function watchMRs($: EngineInterface): Promise<void> {
     if (!waking.length || told.get(mr.iid) === fp) continue
     told.set(mr.iid, fp)
     // A lot's session wakes for its own MR only; the Lead session never wakes, it says where to go.
-    if (lotBranch === mr.branch) handOff($, babysitPrompt(mr.iid, mr.title, d!))
+    const agent = (await lotAgents($))[mr.branch]
+    if (agent && !lotBranch) await $.session.send({ to: { agentId: agent }, text: babysitPrompt(mr.iid, mr.title, d!) })
+    else if (lotBranch === mr.branch) handOff($, babysitPrompt(mr.iid, mr.title, d!))
     else if (!lotBranch) void $.ui.notify(`!${mr.iid} ${fp} → ccw attach ${mr.branch}`, { title: TITLE })
   }
   mrs = next
@@ -232,7 +235,8 @@ async function refreshPanel($: EngineInterface, force = false): Promise<void> {
       ? dew.slice(0, 6).map(d => ({ label: `${d.id} ${d.title}`, href: d.url, value: `${d.priority} · ${d.complexity}`, tone: d.priority === 'Critical' ? 'error' : undefined }))
       : [{ label: '—', value: 'aucun ticket Ready', tone: 'subtle' }]
   const session = await sessionRows($)
-  await update($, snapshot, () => ({ at: t, mrs: mrRows, reviews: reviewRows, bugs: bugRows(t), dew: dewRows, session }))
+  const lots = await lotRows($)
+  await update($, snapshot, () => ({ at: t, lots, mrs: mrRows, reviews: reviewRows, bugs: bugRows(t), dew: dewRows, session }))
 }
 
 // Everything slow (go build of mrwatch, `task dew` compiling the dolmen CLI, Notion, glab) runs here,
@@ -255,7 +259,7 @@ async function report($: EngineInterface): Promise<string | undefined> {
   if (s.at === 0) return undefined
   const t = await now($)
   const block = (title: string, rows: PanelRow[]) => [title, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n')
-  return [block('MES MR', s.mrs), block('À RELIRE', s.reviews), block('BUGS DE MES SCOPES (SLO)', s.bugs), block('MON DEW', s.dew), block('SESSION', s.session), `(lu il y a ${ago(t - s.at)} ; mise à jour en cours)`].join('\n\n')
+  return [block('LOTS EN COURS', s.lots), block('MES MR', s.mrs), block('À RELIRE', s.reviews), block('BUGS DE MES SCOPES (SLO)', s.bugs), block('MON DEW', s.dew), block('SESSION', s.session), `(lu il y a ${ago(t - s.at)} ; mise à jour en cours)`].join('\n\n')
 }
 
 // --- commands that hand work to the model ---------------------------------------------------------
@@ -311,11 +315,85 @@ async function showNext($: EngineInterface): Promise<void> {
   $.ui.toast(next ? `Prochain : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}` : 'Aucun ticket Ready dans ton DEW.')
 }
 
+// --- lots and their agents -------------------------------------------------------------------------
+
+// Each lot opened from the Lead session gets its own agent, started in the lot's worktree; the Lead
+// sends it the lot's commands and its MR's events. Kept across reloads: branch → agentId.
+async function lotAgents($: EngineInterface): Promise<Record<string, string>> {
+  return ((await $.store.get('lotAgents')) as Record<string, string> | undefined) ?? {}
+}
+
+const AGENT_STATE: Record<string, string> = { pending: 'démarre', running: 'travaille', waiting: 'attend', idle: 'attend ta réponse', completed: 'a fini son tour', failed: 'en échec', killed: 'arrêté' }
+
+async function lotRows($: EngineInterface): Promise<PanelRow[]> {
+  if (!root) return []
+  const agents = await lotAgents($)
+  const list = await $.agent.list().catch(() => [])
+  const rows: PanelRow[] = []
+  for (const lot of await lotDirs($, root)) {
+    const s = await gitStatus($, lot.dir)
+    const mr = mrs.find(m => m.mr.branch === lot.name)
+    const agent = list.find(a => a.id === agents[lot.name])
+    const parts = [
+      agent ? `agent : ${AGENT_STATE[agent.status] ?? agent.status}` : agents[lot.name] ? 'agent fermé' : 'pas d\'agent (/plan)',
+      !s ? '' : s.upstream !== `origin/${lot.name}` ? (s.ahead || s.dirty ? 'pas encore poussée' : '') : s.ahead ? `${s.ahead} commits locaux` : '',
+      mr ? `!${mr.mr.iid}${mr.d ? ` ${mrValue(mr.d).value}` : ''}` : '',
+    ].filter(Boolean)
+    rows.push({ label: lot.name, href: mr?.mr.url, value: parts.join(' · '), tone: mr?.d ? mrValue(mr.d).tone : agent?.status === 'idle' ? 'warning' : undefined })
+  }
+  return rows.length ? rows : [{ label: '—', value: 'aucun lot ouvert (/ticket ET-…)', tone: 'subtle' }]
+}
+
+// The lot a command names: this session's own, else the one whose branch holds the ET id given,
+// else the only one open.
+async function lotFor($: EngineInterface, args: string): Promise<{ name: string; dir: string } | string> {
+  if (!root) return 'Pas dans Dolmen.'
+  const lots = await lotDirs($, root)
+  const id = ticketIds(args)[0]
+  const lot = id ? lots.find(l => ticketIds(l.name).includes(id)) : lots.length === 1 ? lots[0] : undefined
+  if (lot) return lot
+  return lots.length ? `Quel lot ? Ajoute son ticket, par exemple /plan ${ticketIds(lots[0]!.name)[0]} (ouverts : ${lots.map(l => ticketIds(l.name).join('+')).join(', ')}).` : 'Aucun lot ouvert : /ticket ET-… d\'abord.'
+}
+
+const lotBrief = (name: string, dir: string) =>
+  [
+    `Tu es l'agent du lot ${name} (tickets ${ticketIds(name).join(', ')}). Tu travailles uniquement dans ${dir}, sa branche et son worktree.`,
+    'Lis les tickets avec ticket_card. Tu ne merges pas, n\'approuves pas, ne sors pas du Draft, ne résous aucun fil : ces gestes sont à Younes.',
+    'Quand tu as besoin de lui, finis ton tour par la question. Ses messages et les événements de la MR t\'arrivent ici.',
+  ].join('\n')
+
+// A lot's command: in the lot's own session, to the model; from the Lead, to the lot's agent,
+// started in the worktree when it has none yet.
+async function toLot($: EngineInterface, args: string, text: string): Promise<string> {
+  if (lotBranch) {
+    handOff($, text)
+    return 'La demande part à l\'agent.'
+  }
+  const lot = await lotFor($, args)
+  if (typeof lot === 'string') return lot
+  const agents = await lotAgents($)
+  const known = agents[lot.name]
+  if (known) {
+    const sent = await $.session.send({ to: { agentId: known }, text }).catch(() => ({ isDelivered: false as const }))
+    if (sent.isDelivered) return `→ agent du lot ${lot.name}.`
+  }
+  $.clock.after(1, () => void startLotAgent($, lot.name, lot.dir, text))
+  return `Agent du lot ${lot.name} démarré dans son worktree. Il apparaît dans tes agents et dans « Lots en cours ».`
+}
+
+async function startLotAgent($: EngineInterface, name: string, dir: string, text: string): Promise<void> {
+  const r = await $.agent.spawn({ prompt: `${lotBrief(name, dir)}\n\n${text}`, description: `Lot ${ticketIds(name).join('+')}`, cwd: dir })
+  if (!('agentId' in r) || !r.agentId) {
+    $.ui.toast(`L'agent du lot ${name} n'a pas démarré${'deny' in r ? ` : ${r.deny}` : ''}`)
+    return
+  }
+  await $.store.set('lotAgents', { ...(await lotAgents($)), [name]: r.agentId })
+}
+
 // --- commands -----------------------------------------------------------------------------------
 
-async function cmdPrompt($: EngineInterface, name: 'plan' | 'mr' | 'note'): Promise<CommandRunResult> {
-  handOff($, PROMPTS[name])
-  return { text: `/${name} : la demande part à l'agent.` }
+async function cmdPrompt($: EngineInterface, name: 'plan' | 'mr' | 'note', e: CommandRunInput): Promise<CommandRunResult> {
+  return { text: `/${name} : ${await toLot($, e.args ?? '', PROMPTS[name])}` }
 }
 
 async function cmdTicket($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
@@ -337,22 +415,23 @@ async function cmdAjouter($: EngineInterface, e: CommandRunInput): Promise<Comma
 async function cmdDetacher($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
   const id = ticketIds((e.args ?? ""))[0]
   if (!id) return { text: 'Usage : /detacher ET-4481' }
-  handOff($, PROMPTS.detacher(id))
-  return { text: `L'agent prépare la sortie de ${id} du lot.` }
+  return { text: await toLot($, e.args ?? '', PROMPTS.detacher(id)) }
 }
 
 // Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
 async function cmdPret($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
   if (e.origin.kind !== 'composer') return { text: '/pret ne s’exécute que tapé par toi.' }
-  const iid = Number(/\d+/.exec((e.args ?? ""))?.[0]) || (await here($)).iid
+  const args = e.args ?? ''
+  const lot = lotBranch ? undefined : await lotFor($, args)
+  const lotMr = typeof lot === 'object' ? mrs.find(m => m.mr.branch === lot.name)?.mr.iid : undefined
+  const iid = Number(/\d+/.exec(args.replace(/\bET[-_]\d+/gi, ''))?.[0]) || lotMr || (await here($)).iid
   if (!iid || !root) return { text: 'Aucune MR pour cette branche. Usage : /pret 2961' }
   const d = await digest($, root, mrwatch, iid)
   if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) {
     return { text: `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.` }
   }
   readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
-  handOff($, PROMPTS.pret(iid))
-  return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅.` }
+  return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅. ${await toLot($, args, PROMPTS.pret(iid))}` }
 }
 
 async function cmdRelire($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
@@ -462,11 +541,11 @@ export const register: Register = on => {
   on('command.run', async ($, e, next) => {
     switch (e.command.replace(/^dolmen-ops:/, '')) {
       case 'plan':
-        return cmdPrompt($, 'plan')
+        return cmdPrompt($, 'plan', e)
       case 'mr':
-        return cmdPrompt($, 'mr')
+        return cmdPrompt($, 'mr', e)
       case 'note':
-        return cmdPrompt($, 'note')
+        return cmdPrompt($, 'note', e)
       case 'ticket':
         return cmdTicket($, e)
       case 'ajouter':
@@ -528,6 +607,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {s.at === 0 && <Text color={EF.grey}>Chargement…</Text>}
+        {s.at > 0 && section('LOTS EN COURS', s.lots)}
         {s.at > 0 && section('MES MR', s.mrs)}
         {s.at > 0 && section('À RELIRE', s.reviews)}
         {s.at > 0 && section('BUGS DE MES SCOPES', s.bugs)}
@@ -536,7 +616,7 @@ export const register: Register = on => {
         <Box flexDirection="row" gap={1}>
           <Button key="refresh" label="Rafraîchir" onPress={() => void warm($)} />
           <Button key="next" label="Ticket suivant" onPress={() => void showNext($)} />
-          <Button key="note" label="Note d'état sur la MR" onPress={() => handOff($, PROMPTS.note)} />
+          <Button key="note" label="Note d'état sur la MR" onPress={() => void toLot($, '', PROMPTS.note)} />
         </Box>
         {s.at > 0 && <Text color={EF.grey}>{`mis à jour il y a ${ago(t - s.at)}`}</Text>}
       </Box>

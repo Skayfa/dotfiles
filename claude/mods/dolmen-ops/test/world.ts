@@ -14,6 +14,8 @@ export type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 export type World = {
   cwd?: string
   env?: Record<string, string>
+  store?: Record<string, unknown>
+  agents?: { id: string; status: 'idle' | 'running' }[]
   dirs?: Record<string, string[]>
   files?: Record<string, string>
   answer?: (argv: string[], body: unknown) => Answer
@@ -28,7 +30,7 @@ export function world(on: On, w: World = {}) {
   const prompts = (w.prompts ??= [])
   const files = (w.files ??= { [`${ROOT}/cmd/dolmen/main.go`]: 'package main' })
   mock.env(on, { HOME: '/w', TMPDIR: '/tmp', ...w.env })
-  mock.store(on)
+  mock.store(on, w.store)
   const clock = mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd ?? ROOT }))
@@ -38,6 +40,17 @@ export function world(on: On, w: World = {}) {
   on('agent.register', (_, e) => ({ value: { agent: `dolmen-ops:${e.name}` } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  const spawned: { prompt: string; cwd?: string }[] = []
+  const sent: { to: unknown; text: string }[] = []
+  on('agent.spawn', (_, e) => {
+    spawned.push({ prompt: e.prompt, cwd: e.cwd })
+    return { model: 'claude-opus-5-5', agentId: `ag-${spawned.length}` }
+  })
+  on('agent.list', () => ({ value: (w.agents ?? []).map(a => ({ ...a, description: 'lot', type: 'general-purpose' })) }))
+  on('session.send', (_, e) => {
+    sent.push({ to: e.to, text: e.text })
+    return { isDelivered: true as const }
+  })
   const notes: string[] = []
   on('ui.notify', (_, e) => {
     notes.push(e.text)
@@ -62,7 +75,7 @@ export function world(on: On, w: World = {}) {
     const a = w.answer?.(argv, body) ?? {}
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  return { calls, prompts, clock, notes }
+  return { calls, prompts, clock, notes, spawned, sent }
 }
 
 export const START = { cwd: ROOT, surface: 'terminal', isInteractive: true } as const
