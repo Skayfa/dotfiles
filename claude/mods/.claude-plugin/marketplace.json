@@ -1,0 +1,5 @@
+{
+  "name": "skayfa",
+  "owner": { "name": "Skayfa" },
+  "plugins": [{ "name": "dolmen-ops", "source": "./dolmen-ops" }]
+}

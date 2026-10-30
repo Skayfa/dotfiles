@@ -1,0 +1,6 @@
+{
+  "name": "dolmen-ops",
+  "version": "0.1.0",
+  "description": "Dolmen (Empowill): a ticket or a lot of tickets from Notion to a branch and its worktree in one command, the MRs watched in code (mrwatch), bugs by SLO in your scopes, the gestures reserved to the author refused, test output trimmed, cost per lot, /etat and /panneau",
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,510 @@
+// dolmen-ops: the code watches, the model decides. Opens a ticket or a lot of tickets from Notion
+// into a branch and its worktree, watches Younes's MRs with mrwatch and wakes the session on what
+// needs an answer (/veille), keeps the Notion status in step with the MR, ranks the bugs of his
+// scopes by SLO, refuses the gestures reserved to the author, trims test output and counts the cost
+// of each lot. Every check is code, so it costs no tokens until something happens.
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
+import type { PanelRow, PanelSnapshot } from '../types'
+import {
+  buildMrwatch,
+  cardText,
+  dewList,
+  digest,
+  dolmenRoot,
+  findTicket,
+  gitStatus,
+  glabMe,
+  myBugs,
+  myMRs,
+  myScopes,
+  notionMe,
+  pipelineCount,
+  reviewMRs,
+  setStatus,
+  sh,
+  type MR,
+  type Scope,
+} from './dolmen.ts'
+import { lotAdd, lotOpen, sweep, sweepApply } from './lots.ts'
+import {
+  AMEND_REFUSAL,
+  HANDOFF_SECTION,
+  MODELS_SECTION,
+  ago,
+  amendIn,
+  babysitPrompt,
+  highLimits,
+  mrValue,
+  refusal,
+  shouldTrim,
+  slo,
+  sortBugs,
+  ticketIds,
+  wakingEvents,
+  wrapForTrim,
+  type Bug,
+  type Digest,
+} from './rules.ts'
+
+const TICK_MS = 2 * 60_000 // MRs: a pipeline takes ~20 min, two minutes is soon enough
+const SLOW_MS = 60 * 60_000 // Notion and the review list: once an hour, the Notion API allowance is small
+const READY_TTL_MS = 2 * 3_600_000
+const TITLE = 'Dolmen'
+const PANE = 'dolmen-ops'
+const WINDOWS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
+// Everforest Dark, the owner's palette (dotfiles: alacritty, tmux status bar, hunk).
+const EF = { bg: '#2d353b', fg: '#d3c6aa', grey: '#859289', green: '#a7c080', yellow: '#dbbc7f', red: '#e67e80' }
+const TONE = { success: EF.green, warning: EF.yellow, error: EF.red, subtle: EF.grey } as const
+const ARROW = '' // the Powerline separator of the tmux status bar
+
+const EMPTY: PanelSnapshot = { at: 0, mrs: [], reviews: [], bugs: [], dew: [], session: [] }
+// Bump the tag when PanelSnapshot changes: it declines what an older version stored.
+const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-1' })
+
+// Module state: a reload starts it over.
+let root: string | undefined
+let mrwatch: string[] = []
+let panelOn = false
+let slowAt = 0
+let quotaHigh = false
+let lastUsd: number | undefined
+const warned = new Set<string>()
+const told = new Map<number, string>() // MR → the events last told, so one wake per change
+const readyArmed = new Map<string, number>() // MR iid → until when /pret allows leaving Draft
+let mrs: { mr: MR; d?: Digest }[] = []
+let reviews: MR[] = []
+let bugs: Bug[] | undefined
+let dew: { id: string; title: string; priority: string; complexity: string }[] | undefined
+let me: string | undefined
+let scopes: Scope[] = []
+
+async function now($: EngineInterface) {
+  return $.clock.now()
+}
+
+const isOn = async ($: EngineInterface) => (await $.store.get('veille')) === true
+
+// --- watching -------------------------------------------------------------------------------------
+
+async function watchMRs($: EngineInterface): Promise<void> {
+  if (!root) return
+  const list = await myMRs($)
+  if (!list) return
+  const next: typeof mrs = []
+  for (const mr of list) {
+    const d = await digest($, root, mrwatch, mr.iid)
+    next.push({ mr, d })
+    await syncStatus($, mr)
+    const waking = d ? wakingEvents(d) : []
+    const fp = waking.join(' ')
+    if (!waking.length || told.get(mr.iid) === fp) continue
+    told.set(mr.iid, fp)
+    void $.ui.notify(`!${mr.iid} ${fp}`, { title: TITLE })
+    if (await isOn($)) void $.prompt.submit({ text: babysitPrompt(mr.iid, mr.title, d!) })
+  }
+  mrs = next
+}
+
+// An open MR moves its tickets from In Progress to « Merge request » (gitlab-sync is not merged yet).
+async function syncStatus($: EngineInterface, mr: MR): Promise<void> {
+  const synced = ((await $.store.get('synced')) as string[] | undefined) ?? []
+  for (const id of mr.tickets.filter(t => !synced.includes(t))) {
+    const c = await findTicket($, root!, id)
+    if (!c) continue
+    if (c.status === 'In Progress') await setStatus($, root!, c.pageId, 'Merge request')
+    synced.push(id)
+    await $.store.set('synced', synced.slice(-200))
+  }
+}
+
+async function watchSlow($: EngineInterface, force = false): Promise<void> {
+  const t = await now($)
+  if (!root || (!force && t - slowAt < SLOW_MS)) return
+  slowAt = t
+  me ??= await notionMe($, root)
+  if (me && !scopes.length) scopes = await myScopes($, root, me)
+  bugs = me ? await myBugs($, root, me, scopes) : undefined
+  dew = (await dewList($, root))?.map(d => ({ id: d.id, title: d.title, priority: d.priority, complexity: d.complexity }))
+  const user = await glabMe($)
+  reviews = user ? ((await reviewMRs($, user)) ?? []) : []
+}
+
+async function tick($: EngineInterface): Promise<void> {
+  if (!root) return
+  if (panelOn || (await isOn($))) await watchMRs($).catch(() => {})
+  if (panelOn) {
+    await watchSlow($).catch(() => {})
+    await refreshPanel($).catch(() => {})
+  }
+}
+
+// --- the panel and /etat --------------------------------------------------------------------------
+
+function bugRows(t: number): PanelRow[] {
+  if (!bugs) return [{ label: 'Notion', value: 'injoignable (NOTION_TOKEN ?)', tone: 'subtle' }]
+  if (!bugs.length) return [{ label: '—', value: 'aucun bug ouvert dans tes scopes', tone: 'success' }]
+  return sortBugs(bugs, t)
+    .slice(0, 8)
+    .map(b => {
+      const s = slo(b, t)
+      const who = b.mine ? 'À TOI' : b.assignees.length ? 'pris' : 'personne'
+      return {
+        label: `${b.id} ${b.title}`,
+        value: `${b.priority || 'sans priorité'} · ${s.age} j${s.limit ? ` / ${s.limit} j` : ''} · ${who}`,
+        tone: s.late ? 'error' : !b.priority ? 'warning' : b.mine ? 'warning' : 'subtle',
+      }
+    })
+}
+
+async function sessionRows($: EngineInterface): Promise<PanelRow[]> {
+  const rows: PanelRow[] = []
+  const cwd = await $.session.cwd()
+  const s = await gitStatus($, cwd)
+  if (s?.branch && ticketIds(s.branch).length) {
+    const pushed = s.upstream === `origin/${s.branch}`
+    rows.push({
+      label: s.branch,
+      value: !pushed ? 'jamais poussée' : s.ahead ? `${s.ahead} commit${s.ahead > 1 ? 's' : ''} locaux` : 'à jour',
+      tone: !pushed || s.ahead ? 'warning' : 'success',
+    })
+    const cost = ((await $.store.get('cost')) as Record<string, number> | undefined)?.[s.branch]
+    const mr = mrs.find(m => m.mr.branch === s.branch)?.mr
+    const pipelines = mr ? await pipelineCount($, mr.iid) : undefined
+    if (cost !== undefined || pipelines !== undefined) {
+      rows.push({ label: 'Coût du lot', value: [cost !== undefined ? `${cost.toFixed(2)} $` : '', pipelines !== undefined ? `${pipelines} pipelines` : ''].filter(Boolean).join(' · ') })
+    }
+  }
+  rows.push({ label: 'Veille', value: (await isOn($)) ? 'active : réveille la session' : 'notifie seulement (/veille on)', tone: (await isOn($)) ? 'success' : 'subtle' })
+  for (const l of (await $.session.usage()).rateLimits) {
+    rows.push({
+      label: `Quota ${WINDOWS[l.kind] ?? l.kind.replace('_', ' ')}`,
+      value: `${Math.round(l.percentUsed)} %`,
+      tone: l.percentUsed >= 90 ? 'error' : l.percentUsed >= 75 ? 'warning' : 'success',
+    })
+  }
+  return rows
+}
+
+async function refreshPanel($: EngineInterface, force = false): Promise<void> {
+  if (force) {
+    await watchMRs($).catch(() => {})
+    await watchSlow($, true).catch(() => {})
+  }
+  const t = await now($)
+  const mrRows: PanelRow[] = mrs.length
+    ? mrs.flatMap(({ mr, d }) => {
+        const v = d ? mrValue(d) : { value: 'mrwatch injoignable (glab auth status ?)', tone: 'subtle' as const }
+        const row: PanelRow = { label: `!${mr.iid} ${mr.tickets.join(' + ') || mr.title}`, ...v }
+        const threads = (d?.threads ?? []).slice(0, 2).map(th => ({ label: `  ${th.author}`, value: th.where || 'fil général', tone: 'subtle' as const }))
+        return [row, ...threads]
+      })
+    : [{ label: '—', value: 'aucune MR ouverte', tone: 'subtle' }]
+  const reviewRows: PanelRow[] = reviews.length
+    ? reviews.map(r => ({ label: `!${r.iid} ${r.tickets.join(' + ') || r.title} (${r.author})`, value: `demandée · ${ago(t - Date.parse(r.updatedAt))}`, tone: 'warning' }))
+    : [{ label: '—', value: 'rien à relire', tone: 'subtle' }]
+  const dewRows: PanelRow[] = !dew
+    ? [{ label: 'task dew', value: 'injoignable', tone: 'subtle' }]
+    : dew.length
+      ? dew.slice(0, 6).map(d => ({ label: `${d.id} ${d.title}`, value: `${d.priority} · ${d.complexity}`, tone: d.priority === 'Critical' ? 'error' : undefined }))
+      : [{ label: '—', value: 'aucun ticket Ready', tone: 'subtle' }]
+  const session = await sessionRows($)
+  await update($, snapshot, () => ({ at: t, mrs: mrRows, reviews: reviewRows, bugs: bugRows(t), dew: dewRows, session }))
+}
+
+async function report($: EngineInterface): Promise<string> {
+  await refreshPanel($, true)
+  const s = await read($, snapshot)
+  const block = (title: string, rows: PanelRow[]) => [title, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n')
+  return [block('MES MR', s.mrs), block('À RELIRE', s.reviews), block('BUGS DE MES SCOPES (SLO)', s.bugs), block('MON DEW', s.dew), block('SESSION', s.session)].join('\n\n')
+}
+
+// --- commands that hand work to the model ---------------------------------------------------------
+
+const PROMPTS = {
+  plan: [
+    'Pour le lot de cette branche : lis chaque ticket avec ticket_card, puis le skill grill (epic, sillon, codebase, insights).',
+    'Contrôles readiness avant tout code, comme Panoramix : le droit RPC `auth:` des écrans touchés, le profil qui voit l\'écran, le menu et la route, les données showcase.',
+    'Écris-moi ensuite le test plan au format « En tant que <rôle> : <actions> → <résultat> », un critère par ligne. N\'écris le Plan dans Notion qu\'après mon OK.',
+  ].join('\n'),
+  mr: [
+    'Ouvre la MR de ce lot avec le skill open-mr-empowill : Draft, titre `[ET-…][ET-…] Titre`, le template Default.md collé dans --description,',
+    'un lien par ticket dans « Link to Notion ticket », le test plan. Ajoute une section « État » : fait / reste / prochaine commande. Un seul push.',
+  ].join('\n'),
+  note: 'Mets à jour la section « État » de la description de la MR de ce lot : fait (avec preuves), reste, prochaine commande. Aucun push.',
+  detacher: (id: string) =>
+    [
+      `Sors ${id} de ce lot sans réécrire l'historique poussé : crée la branche ${id}-<slug> depuis origin/main dans le dossier des worktrees de ccw,`,
+      `cherry-pick les commits \`[${id}]\` du lot, puis ajoute dans le lot un commit qui les revert. Retire [${id}] du titre et son lien de la MR. Montre-moi le plan avant de pousser.`,
+    ].join('\n'),
+  pret: (iid: number) =>
+    [
+      `Sortie de Draft de !${iid}, dans cet ordre, en t'arrêtant au premier échec :`,
+      '1. skill verify sur les critères du lot (task test-pkg, jamais go test brut) ;',
+      '2. recette locale par l\'agent dolmen-ops:runner : `task run` s\'il ne tourne pas, `task recette-seed` une fois par base, puis `task recette MR=' + iid + ' POST=1` ; lis les verdicts en texte ;',
+      '3. skill qa-will pour la fiche CSM ;',
+      `4. si tous les critères sont ✅ : \`glab mr update ${iid} --ready\` (autorisé pour 2 h par /pret). Sinon, dis-moi ce qui manque.`,
+    ].join('\n'),
+  relire: (iid: string) => `Relis !${iid} avec le skill review-mr-empowill. Propose les commentaires ; n'en poste aucun sans mon OK, n'approuve jamais.`,
+  epic: (url: string) =>
+    [
+      `Epic ${url} : lis-la (contexte, scope, hors-scope, insights, tickets liés) avec le MCP Notion, sans rien écrire.`,
+      'Propose un découpage en tickets ≤ Medium avec un Plan « En tant que … → … » chacun, leurs dépendances et l\'ordre. Marque ceux qu\'un lot peut regrouper (même scope) et ceux que Panoramix peut prendre.',
+      'Je valide avec le binôme produit avant toute création dans Notion.',
+    ].join('\n'),
+}
+
+async function here($: EngineInterface): Promise<{ cwd: string; branch?: string; iid?: number }> {
+  const cwd = await $.session.cwd()
+  const branch = (await gitStatus($, cwd))?.branch
+  if (!mrs.length) await watchMRs($).catch(() => {})
+  return { cwd, branch, iid: mrs.find(m => m.mr.branch === branch)?.mr.iid }
+}
+
+// --- registration ---------------------------------------------------------------------------------
+
+const COMMANDS: [string, string][] = [
+  ['ticket', 'Dolmen : prend un ou plusieurs tickets (ET-…) et ouvre leur lot : claim Notion, branche, worktree ccw'],
+  ['ajouter', 'Dolmen : ajoute un ticket (ET-…) au lot de ce worktree'],
+  ['detacher', 'Dolmen : sort un ticket (ET-…) de ce lot vers sa propre branche'],
+  ['plan', 'Dolmen : grill + contrôles readiness + test plan du lot'],
+  ['mr', 'Dolmen : ouvre la MR Draft du lot (open-mr-empowill)'],
+  ['pret', 'Dolmen : verify, recette, qa-will, puis sortie de Draft (tapé par toi)'],
+  ['note', 'Dolmen : met à jour la section État de la MR'],
+  ['relire', 'Dolmen : relit une MR d\'un collègue (review-mr-empowill), sans rien poster'],
+  ['epic', 'Dolmen : propose le découpage d\'une epic en tickets ≤ Medium'],
+  ['bugs', 'Dolmen : les bugs de tes scopes, classés par SLO'],
+  ['etat', 'Dolmen : MR, relectures, bugs, DEW, coût du lot, quota'],
+  ['panneau', 'Dolmen : ouvre le panneau'],
+  ['veille', 'Dolmen : /veille on réveille la session sur les fils et la CI de tes MR ; /veille off notifie seulement'],
+  ['menage', 'Dolmen : les worktrees de lots déjà mergés. /menage go les supprime (ccw rm)'],
+]
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    root = await dolmenRoot($, e.cwd).catch(() => undefined)
+    if (!root) return next(e) // not a Dolmen session: the mod stays quiet
+    mrwatch = await buildMrwatch($, root).catch(() => ['go', 'run', './.agents/skills/babysit-mr-empowill/mrwatch'])
+    $.clock.every(TICK_MS, () => void tick($))
+    for (const [name, description] of COMMANDS) await $.command.register({ name, description }).catch(() => {})
+    await $.tool
+      .register({
+        name: 'ticket_card',
+        isDeferred: false,
+        description: 'Dolmen: a Notion ticket as a compact card (title, type, priority, complexity, status, epic, Plan, page text capped at 6000 chars). Use it instead of fetching the Notion page.',
+        inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'ET-XXXX' } }, required: ['id'] },
+      })
+      .catch(() => {})
+    await $.agent
+      .register({
+        name: 'runner',
+        description: 'Runs one Dolmen check (task test-pkg, task lint, task recette, a CI job log) and reports it in a few lines. Cheap model: use it for anything that only runs and reads.',
+        model: 'haiku',
+        tools: ['Bash', 'Read', 'Grep'],
+        prompt: [
+          'You run one Dolmen command and report it. Do not change code, commit or post anything.',
+          'Use the repo\'s tasks (task test-pkg PKG=…, task lint, task recette …), never raw go test.',
+          'Report: the command, pass/fail, each failing test or criterion with its first error line, and the log path dolmen-ops printed.',
+          'For a recette, read the verdict per criterion as text; open a capture only for a ❌.',
+        ].join('\n'),
+      })
+      .catch(() => {})
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'mcp__dolmen-ops__ticket_card' }, async ($, e) => {
+    if (!root) return { deny: 'Not in a Dolmen checkout.' }
+    const id = ticketIds(String(e.id ?? ''))[0]
+    if (!id) return { deny: 'ticket_card needs an id like ET-4236.' }
+    const c = await findTicket($, root, id, true)
+    return c ? { result: cardText(c) } : { deny: `${id}: not found in Notion (NOTION_TOKEN in ~/.dolmen/.envprivate?).` }
+  })
+
+  on('command.run', { command: 'ticket' }, async ($, e) => {
+    if (!root) return { text: 'Pas dans Dolmen.' }
+    const ids = ticketIds(e.args)
+    if (!ids.length) {
+      const next = (await dewList($, root))?.[0]
+      return { text: next ? `Prochain ticket de ton DEW : ${next.id} ${next.title} (${next.priority}, ${next.complexity}). Tape /ticket ${next.id}.` : 'Aucun ticket Ready dans ton DEW.' }
+    }
+    return { text: (await lotOpen($, root, ids, /\bforce\b/.test(e.args))).text }
+  })
+
+  on('command.run', { command: 'ajouter' }, async ($, e) => {
+    const id = ticketIds(e.args)[0]
+    if (!root || !id) return { text: 'Usage : /ajouter ET-4481' }
+    return { text: await lotAdd($, root, await $.session.cwd(), id, /\bforce\b/.test(e.args)) }
+  })
+
+  on('command.run', { command: 'detacher' }, async ($, e) => {
+    const id = ticketIds(e.args)[0]
+    if (!id) return { text: 'Usage : /detacher ET-4481' }
+    void $.prompt.submit({ text: PROMPTS.detacher(id) })
+    return { text: `L'agent prépare la sortie de ${id} du lot.` }
+  })
+
+  for (const name of ['plan', 'mr', 'note'] as const) {
+    on('command.run', { command: name }, async $ => {
+      void $.prompt.submit({ text: PROMPTS[name] })
+      return { text: `/${name} : la demande part à l'agent.` }
+    })
+  }
+
+  // Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
+  on('command.run', { command: 'pret' }, async ($, e) => {
+    if (e.origin.kind !== 'composer') return { text: '/pret ne s’exécute que tapé par toi.' }
+    const iid = Number(/\d+/.exec(e.args)?.[0]) || (await here($)).iid
+    if (!iid || !root) return { text: 'Aucune MR pour cette branche. Usage : /pret 2961' }
+    const d = await digest($, root, mrwatch, iid)
+    if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) {
+      return { text: `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.` }
+    }
+    readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
+    void $.prompt.submit({ text: PROMPTS.pret(iid) })
+    return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅.` }
+  })
+
+  on('command.run', { command: 'relire' }, async ($, e) => {
+    const iid = /\d+/.exec(e.args)?.[0] ?? (reviews[0] ? String(reviews[0].iid) : undefined)
+    if (!iid) return { text: 'Rien à relire. Usage : /relire 2958' }
+    void $.prompt.submit({ text: PROMPTS.relire(iid) })
+    return { text: `!${iid} : relecture préparée, rien ne sera posté sans ton OK.` }
+  })
+
+  on('command.run', { command: 'epic' }, async ($, e) => {
+    if (!e.args.trim()) return { text: 'Usage : /epic <lien Notion de l\'epic>' }
+    void $.prompt.submit({ text: PROMPTS.epic(e.args.trim()) })
+    return { text: 'Découpage de l\'epic demandé à l\'agent. Rien n\'est créé dans Notion sans ton OK.' }
+  })
+
+  on('command.run', { command: 'bugs' }, async $ => {
+    await watchSlow($, true).catch(() => {})
+    const t = await now($)
+    const rows = bugRows(t)
+    const lead = scopes.filter(s => s.role === 'Lead').map(s => s.name)
+    return { text: [`Bugs ouverts de tes scopes${lead.length ? ` (Lead : ${lead.join(', ')})` : ''}, en jours ouvrés contre le SLO :`, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n') }
+  })
+
+  on('command.run', { command: 'etat' }, async $ => ({ text: await report($) }))
+
+  on('command.run', { command: 'veille' }, async ($, e) => {
+    const on_ = e.args.trim() !== 'off'
+    await $.store.set('veille', on_)
+    if (on_) await watchMRs($).catch(() => {})
+    return { text: on_ ? 'Veille active : un nouveau fil, un conflit ou une CI rouge sur tes MR réveille la session (babysit-mr-empowill).' : 'Veille coupée : notifications seulement.' }
+  })
+
+  on('command.run', { command: 'menage' }, async ($, e) => {
+    if (!root) return { text: 'Pas dans Dolmen.' }
+    const s = await sweep($, root)
+    const lines = [...s.done.map(l => `mergé, propre : ${l.name}`), ...s.dirty.map(n => `mergé mais modifié (gardé) : ${n}`)]
+    if (e.args.trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
+    if (e.origin.kind !== 'composer') return { text: '/menage go ne s’exécute que tapé par toi.' }
+    return { text: (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.' }
+  })
+
+  on('command.run', { command: 'panneau' }, async $ => {
+    panelOn = true
+    await $.ui.open({ id: PANE, title: 'Dolmen', backgroundColor: 'transparent' })
+    await refreshPanel($, true)
+    return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, Notion et relectures toutes les heures.' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    panelOn = true // a pane still open after a reload keeps refreshing
+    const s = await read($, snapshot)
+    const width = Math.max(20, e.props.bodyColumns)
+    const section = (title: string, rows: PanelRow[]) => (
+      <Box flexDirection="column" marginBottom={1} width={width}>
+        <Text>
+          <Text color={EF.bg} backgroundColor={EF.green} bold>
+            {` ${title} `}
+          </Text>
+          <Text color={EF.green}>{ARROW}</Text>
+        </Text>
+        {rows.map(r => (
+          <Box flexDirection="row" justifyContent="space-between" width={width}>
+            <Box flexShrink={1} marginRight={1}>
+              <Text wrap="truncate-end" color={r.tone === 'subtle' ? EF.grey : EF.fg}>
+                {r.label}
+              </Text>
+            </Box>
+            <Box flexShrink={0}>
+              <Text color={r.tone ? TONE[r.tone] : EF.fg} bold={r.tone === 'error'}>
+                {r.value}
+              </Text>
+            </Box>
+          </Box>
+        ))}
+      </Box>
+    )
+    const t = await now($)
+    return (
+      <Box flexDirection="column">
+        {s.at === 0 && <Text color={EF.grey}>Chargement…</Text>}
+        {s.at > 0 && section('MES MR', s.mrs)}
+        {s.at > 0 && section('À RELIRE', s.reviews)}
+        {s.at > 0 && section('BUGS DE MES SCOPES', s.bugs)}
+        {s.at > 0 && section('MON DEW', s.dew)}
+        {s.at > 0 && section('SESSION', s.session)}
+        <Box flexDirection="row" gap={1}>
+          <Button key="refresh" label="Rafraîchir" onPress={() => void refreshPanel($, true)} />
+          <Button key="next" label="Ticket suivant" onPress={() => void $.command.run({ command: 'ticket', args: '' })} />
+          <Button key="note" label="Note d'état sur la MR" onPress={() => void $.prompt.submit({ text: PROMPTS.note })} />
+        </Box>
+        {s.at > 0 && <Text color={EF.grey}>{`mis à jour il y a ${ago(t - s.at)}`}</Text>}
+      </Box>
+    )
+  })
+
+  // The guards: a refusal is the answer when the hook itself fails.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    if (!root) return next(e)
+    const t = await now($)
+    const why = refusal(e.command, mr => (readyArmed.get(mr) ?? 0) > t)
+    if (why) return { deny: why }
+    for (const dir of amendIn(e.command)) {
+      const pushed = await sh($, ['git', 'branch', '-r', '--contains', 'HEAD'], dir)
+      if (pushed.ok && pushed.out) return { deny: AMEND_REFUSAL }
+    }
+    return next(shouldTrim(e.command, e.run_in_background) ? { ...e, command: wrapForTrim(e.command) } : e)
+  }).catch(($, e, next) => (next.called ? next(e) : { deny: 'dolmen-ops: the guard failed; run the command again.' }))
+
+  // The cost of each lot: what each turn cost, put on the lot of the session's branch.
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (!root) return done
+    const usd = (await $.session.usage()).cost?.usd
+    if (usd === undefined) return done
+    const spent = lastUsd === undefined ? 0 : Math.max(0, usd - lastUsd)
+    lastUsd = usd
+    const branch = (await gitStatus($, await $.session.cwd()))?.branch
+    if (spent && branch && ticketIds(branch).length) {
+      const cost = ((await $.store.get('cost')) as Record<string, number> | undefined) ?? {}
+      cost[branch] = (cost[branch] ?? 0) + spent
+      await $.store.set('cost', cost)
+    }
+    return done
+  })
+
+  on('session.measure', ($, e, next) => {
+    const high = highLimits(e.rateLimits)
+    quotaHigh = high.length > 0
+    for (const h of high) {
+      if (warned.has(h.key)) continue
+      warned.add(h.key)
+      $.ui.toast(`Quota ${h.text} : écris l'État de la MR`)
+      void $.ui.notify(`Quota ${h.text}. La session peut s'arrêter sans prévenir : pousse une fois et mets l'État de la MR à jour.`, { title: TITLE })
+    }
+    return next(e)
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    if (!root) return composed
+    const extra = [{ id: 'dolmen-ops:models', text: MODELS_SECTION, scope: 'session' as const }]
+    if (quotaHigh) extra.push({ id: 'dolmen-ops:handoff', text: HANDOFF_SECTION, scope: 'session' as const })
+    return { sections: [...composed.sections, ...extra] }
+  })
+}
