@@ -50,4 +50,4 @@ flowchart TD
 ## Variantes
 
 - **Perso** : même boucle, mais le « contrat » = ton idée qui se précise ; le grill est **itératif dans le temps**.
-- **En parallèle** : plusieurs sujets à la fois via worktrees **`ccw`** (1 Claude isolé / branche) ou **Agent Teams** (plusieurs coéquipiers, 1 working tree) — voir le README.
+- **En parallèle** : plusieurs sujets à la fois avec les **sous-agents natifs** de Claude Code, dans la session courante : un agent par sujet, chacun dans son worktree (`isolation: "worktree"` de l'outil Agent, ou le worktree du lot que le mod lui donne). Tu les suis dans la liste des agents, et le mod réveille le bon quand sa MR ou son run bouge. **Agent Teams** (in-process) quand les agents doivent se coordonner entre eux. `ccw` (une session tmux par branche) reste dans `bin/`, mais n'est plus la voie par défaut.

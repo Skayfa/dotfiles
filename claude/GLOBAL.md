@@ -22,7 +22,7 @@ Perso : même boucle ; le contrat = l'idée qui se précise ; le grill est itér
 - Code, commentaires et **skills** (`claude/skills/*/SKILL.md`) en **anglais**, jamais en français. Les skills : court, simple, clair — pas de prose superflue. Nos échanges restent en français.
 - Pas de commentaires qui répètent juste le nom du type/de la méthode.
 - Avant de push : lire le changeset dans **hunk** (`hd` — c'est là que Claude annote), puis stage/commit/push dans **lazygit**. Brancher depuis `main`.
-- Travail parallèle : Agent Teams (tmux) ou worktrees `ccw`.
+- Travail parallèle : les **sous-agents natifs** de Claude Code, dans la session courante. Un agent par sujet, chacun dans son worktree : `isolation: "worktree"` de l'outil Agent, ou le worktree qu'un mod lui donne comme dossier (dolmen-ops, seammo-ops). **Agent Teams** (in-process) seulement quand les agents doivent se parler. Pas de session à part (`ccw`, tmux) sauf demande explicite.
 - Backups : seulement avant une **réécriture/écrasement**, pas pour un simple ajout.
 
 ## Outils
