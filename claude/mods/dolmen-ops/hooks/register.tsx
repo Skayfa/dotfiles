@@ -4,7 +4,7 @@
 // scopes by SLO, refuses the gestures reserved to the author, trims test output and counts the cost
 // of each lot. Every check is code, so it costs no tokens until something happens.
 import { atom, read, update } from 'claude-code'
-import type { CommandRunInput, CommandRunResult, EngineInterface, Register } from 'claude-code'
+import type { CommandRunInput, CommandRunResult, EngineInterface, Register, Timer } from 'claude-code'
 import type { PanelRow, PanelSnapshot } from '../types'
 import {
   buildMrwatch,
@@ -145,12 +145,14 @@ async function watchSlow($: EngineInterface, force = false): Promise<void> {
 // The ticker. A /clear ends the session's timers with it (no session.start follows), so every hook
 // that runs after one re-arms it when its last tick is too old.
 let lastTick = 0
-let stopTicker: (() => void) | undefined
+let ticker: Timer | undefined
 
+// `every` answers a timer to cancel, not a function: calling it threw, so after a /clear the ticker
+// was never armed again.
 async function ensureTicker($: EngineInterface): Promise<void> {
   if (!root || (await now($)) - lastTick < 2 * TICK_MS) return
-  stopTicker?.()
-  stopTicker = $.clock.every(TICK_MS, () => void tick($))
+  ticker?.cancel()
+  ticker = $.clock.every(TICK_MS, () => void tick($))
   lastTick = await now($)
 }
 
