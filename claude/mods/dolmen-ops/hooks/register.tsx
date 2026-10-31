@@ -539,6 +539,8 @@ export const register: Register = on => {
   // One hook serves every command. With one matcher hook per command, a live session answered only
   // /panneau, the module's last one; /etat and /ticket went unanswered (the tests did not show it).
   on('command.run', async ($, e, next) => {
+    // Outside Dolmen the same names may be another mod's (seammo-ops has /panneau, /etat, /menage).
+    if (!root) return next(e)
     switch (e.command.replace(/^dolmen-ops:/, '')) {
       case 'plan':
         return cmdPrompt($, 'plan', e)

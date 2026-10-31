@@ -185,3 +185,10 @@ test('from the Lead, a lot with an agent gets its commands and its MR events, an
   const etat = (await $.command.run({ command: 'etat', args: '', ...TYPED })).text ?? ''
   expect(etat).toContain('ET-4449-ET-4481-competences : agent : attend ta réponse · !2962')
 })
+
+test('outside Dolmen, another mod’s /panneau goes past this mod', async ($, on) => {
+  world(on, { answer: argv => (argv.includes('rev-parse') ? { stdout: '/w/seafightcopy/.git' } : {}) })
+  on('command.run', (_, e) => ({ text: `beneath: ${e.command}` }))
+  await $.session.start({ ...START, cwd: '/w/seafightcopy' })
+  expect((await $.command.run({ command: 'panneau', args: '', ...TYPED })).text).toBe('beneath: panneau')
+})
