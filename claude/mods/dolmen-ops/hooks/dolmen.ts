@@ -37,9 +37,10 @@ export async function dolmenRoot($: EngineInterface, dir: string): Promise<strin
   return undefined
 }
 
-// ccw's layout: <parent>/<repo>-worktrees/<branch>, or $CCW_HOME.
+// The lots' worktrees live beside the checkout, in <parent>/<repo>-worktrees/<branch> (outside the
+// repo, so Dolmen's .gitignore is untouched), or in $DOLMEN_WORKTREES ($CCW_HOME is still read).
 export async function worktreesHome($: EngineInterface, root: string): Promise<string> {
-  const home = await $.env.get('CCW_HOME')
+  const home = (await $.env.get('DOLMEN_WORKTREES')) ?? (await $.env.get('CCW_HOME'))
   if (home) return home
   const parent = root.replace(/\/[^/]+\/?$/, '')
   return `${parent}/${root.split('/').pop()}-worktrees`
@@ -305,10 +306,22 @@ export async function pipelineCount($: EngineInterface, iid: number): Promise<nu
 }
 
 // mrwatch, built once per session from the main checkout (`go run` compiles at every call).
-export async function buildMrwatch($: EngineInterface, root: string): Promise<string[]> {
-  const bin = `${(await $.env.get('TMPDIR')) ?? '/tmp'}/dolmen-ops-mrwatch`
-  const built = await sh($, ['go', 'build', '-o', bin, MRWATCH], root)
-  return built.ok ? [bin] : ['go', 'run', MRWATCH]
+// One mrwatch binary for every session of the Mac, in the shared folder; built again only when one of
+// its sources is newer (a pull in Dolmen), not once per session.
+export async function buildMrwatch($: EngineInterface, root: string, dir: string): Promise<string[]> {
+  const bin = `${dir}/mrwatch`
+  const built = await $.fs.stat(bin).catch(() => undefined)
+  const sources = await $.fs.list(`${root}/${MRWATCH.replace(/^\.\//, '')}`).catch(() => [])
+  const newest = Math.max(0, ...sources.filter(f => f.kind === 'file' && f.name.endsWith('.go')).map(f => f.mtimeMs))
+  if (built?.kind === 'file' && built.mtimeMs >= newest && newest > 0) return [bin]
+  const r = await sh($, ['go', 'build', '-o', bin, MRWATCH], root)
+  return r.ok ? [bin] : ['go', 'run', MRWATCH]
+}
+
+// When a lot's branch last got a commit, in milliseconds.
+export async function lastCommitAt($: EngineInterface, dir: string): Promise<number | undefined> {
+  const s = Number((await sh($, ['git', '-C', dir, 'log', '-1', '--format=%ct', 'HEAD'])).out)
+  return s ? s * 1000 : undefined
 }
 
 // The read-only digest: events since the last -ack, status, open threads. It remembers nothing.

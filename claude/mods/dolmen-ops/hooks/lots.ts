@@ -5,8 +5,9 @@ import { branchFor, lotObjection, ticketIds } from './rules.ts'
 
 export type Opened = { text: string; branch?: string }
 
-// Claims every ticket (`task dew-claim`) and makes the lot's branch from origin/main in ccw's
-// worktree layout. A ticket that should not join (Critical, Hard, another scope, a 5th) stops it,
+// Claims every ticket (`task dew-claim`) and makes the lot's branch from origin/main in its own
+// worktree beside the checkout. The lot is then worked by an agent of this session (Claude Code's own
+// subagents), started in that worktree by /plan: no separate session. A ticket that should not join (Critical, Hard, another scope, a 5th) stops it,
 // unless `force` (the owner confirmed). Nothing is pushed: the branch goes up with its first fixes.
 export async function lotOpen($: EngineInterface, root: string, wanted: string[], force = false): Promise<Opened> {
   const cards: Card[] = []
@@ -34,13 +35,13 @@ export async function lotOpen($: EngineInterface, root: string, wanted: string[]
     text: [
       `Lot ${branch} : ${cards.map(c => `${c.id} ${c.title}`).join(' · ')}`,
       `In Progress dans Notion, worktree ${path} depuis origin/main.`,
-      `Ensuite : /plan ${cards[0]!.id}. Un agent du lot démarre dans ce worktree (ou, pour une session à part : ccw new ${branch}).`,
+      `Ensuite : /plan ${cards[0]!.id}. L'agent du lot démarre dans ce worktree, dans cette session (il apparaît dans tes agents).`,
     ].join('\n'),
   }
 }
 
-// Adds a ticket to the lot of `dir` and claims it. The branch keeps its name (ccw ties the folder,
-// the branch and the tmux session to it): the MR title and its ticket section carry the new id,
+// Adds a ticket to the lot of `dir` and claims it. The branch keeps its name (the folder, the branch
+// and the lot's agent are tied to it): the MR title and its ticket section carry the new id,
 // which is what notion-ticket-done reads at the merge.
 export async function lotAdd($: EngineInterface, root: string, dir: string, id: string, force = false): Promise<string> {
   const branch = (await gitStatus($, dir))?.branch
@@ -59,7 +60,7 @@ export async function lotAdd($: EngineInterface, root: string, dir: string, id: 
 
 export type Sweep = { done: { dir: string; name: string }[]; dirty: string[] }
 
-// Lot worktrees already in origin/main: clean ones can go (`ccw rm`), dirty ones are only named.
+// Lot worktrees already in origin/main: clean ones can go, dirty ones are only named.
 export async function sweep($: EngineInterface, root: string): Promise<Sweep> {
   await sh($, ['git', '-C', root, 'fetch', 'origin', 'main'])
   const out: Sweep = { done: [], dirty: [] }
@@ -72,13 +73,18 @@ export async function sweep($: EngineInterface, root: string): Promise<Sweep> {
   return out
 }
 
-// `ccw rm <branch>`: kills its tmux session, removes the worktree and deletes the merged branch.
-// Never forced: ccw refuses a dirty or unmerged one by itself.
+// Removes each merged lot's worktree, then its local branch, with git alone. Never forced: `worktree
+// remove` keeps a worktree with changes, `branch -d` keeps a branch not merged.
 export async function sweepApply($: EngineInterface, root: string, s: Sweep): Promise<string[]> {
   const lines: string[] = []
   for (const lot of s.done) {
-    const r = await sh($, ['ccw', 'rm', lot.name], root)
-    lines.push(r.ok ? `supprimé : ${lot.name}` : `${lot.name} : ${r.err || r.out}`)
+    const r = await sh($, ['git', '-C', root, 'worktree', 'remove', lot.dir])
+    if (!r.ok) {
+      lines.push(`${lot.name} gardé : ${r.err.split('\n')[0] || r.out}`)
+      continue
+    }
+    const b = await sh($, ['git', '-C', root, 'branch', '-d', lot.name])
+    lines.push(b.ok ? `supprimé : ${lot.name}` : `worktree supprimé, branche gardée ${lot.name} : ${b.err.split('\n')[0]}`)
   }
   return lines
 }

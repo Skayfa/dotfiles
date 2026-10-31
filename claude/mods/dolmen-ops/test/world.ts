@@ -24,12 +24,14 @@ export type World = {
 }
 
 const entry = (name: string) => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })
+// Each test its own shared-state folder (calls.ts), as each Mac has its own.
+let worlds = 0
 
 export function world(on: On, w: World = {}) {
   const calls = (w.calls ??= [])
   const prompts = (w.prompts ??= [])
   const files = (w.files ??= { [`${ROOT}/cmd/dolmen/main.go`]: 'package main' })
-  mock.env(on, { HOME: '/w', TMPDIR: '/tmp', ...w.env })
+  mock.env(on, { HOME: '/w', TMPDIR: '/tmp', DOLMEN_OPS_CACHE: `/w/.cache/dolmen-ops-${++worlds}`, ...w.env })
   mock.store(on, w.store)
   const clock = mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))

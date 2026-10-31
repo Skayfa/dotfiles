@@ -21,12 +21,13 @@ function dolmen(pages: Record<number, ReturnType<typeof page>>, digest = NOTES) 
   }
 }
 
-test('/ticket opens one lot for two tickets of one scope: claims, branch, ccw worktree', async ($, on) => {
+test('/ticket opens one lot for two tickets of one scope: claims, branch, worktree, worked by an agent of this session', async ($, on) => {
   const { calls } = world(on, { answer: dolmen({ 4449: page(4449, 'Archiver une compétence', { priority: 'High' }), 4481: page(4481, 'Export PDF fiche de poste', { priority: 'High' }) }) })
   await $.session.start(START)
   const out = await $.command.run({ command: 'ticket', args: 'ET-4449 ET-4481', ...TYPED })
   expect(out.text).toContain('Lot ET-4449-ET-4481-archiver-une-competence-export-pdf')
-  expect(out.text).toContain('ccw new ET-4449-ET-4481')
+  expect(out.text).toContain("L'agent du lot démarre dans ce worktree, dans cette session")
+  expect(calls.some(c => c.argv[0] === 'ccw')).toBe(false)
   expect(ran(calls, 'tmux', 'new-window')).toBe(false)
   expect(ran(calls, 'task', 'dew-claim', 'ID=ET-4449')).toBe(true)
   expect(ran(calls, 'task', 'dew-claim', 'ID=ET-4481')).toBe(true)
@@ -67,13 +68,13 @@ test('the session of a lot wakes once on a new thread of its own MR, and its tic
   expect(calls.some(c => c.argv.includes('URL=/v1/pages/page-4481'))).toBe(false)
 })
 
-test('the Lead session never wakes: it notifies where to go', async ($, on) => {
+test('the Lead with no agent for a lot does not wake: it says the pane’s Traiter starts one', async ($, on) => {
   const { prompts, clock, notes } = world(on, { answer: withBranch(dolmen({})) })
   await $.session.start(START)
   await clock.advance(2 * 60_000 + 10)
   await clock.settle()
   expect(prompts).toHaveLength(0)
-  expect(notes[0]).toContain('!2962 NEW_NOTES:1:romain → ccw attach ET-4449-ET-4481-competences')
+  expect(notes[0]).toContain('!2962 NEW_NOTES:1:romain → « Traiter » dans le panneau Dolmen')
 })
 
 test('leaving Draft is allowed only after a /pret typed by Younes, for that MR', async ($, on) => {

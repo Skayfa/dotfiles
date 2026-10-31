@@ -1,11 +1,15 @@
 // dolmen-ops: the code watches, the model decides. Opens a ticket or a lot of tickets from Notion
-// into a branch and its worktree, watches Younes's MRs with mrwatch and wakes the session on what
-// needs an answer (a lot's session for its own MR, the Lead session by notification), keeps the Notion status in step with the MR, ranks the bugs of his
-// scopes by SLO, refuses the gestures reserved to the author, trims test output and counts the cost
-// of each lot. Every check is code, so it costs no tokens until something happens.
+// into a branch and its worktree, worked by an agent of this session (Claude Code's own subagents);
+// watches Younes's MRs with mrwatch and wakes the lot's agent on what needs an answer, keeps the
+// Notion status in step with the MR, ranks the bugs of his scopes by SLO, refuses the gestures
+// reserved to the author, trims test output and counts the cost of each lot. Every check is code, so
+// it costs no tokens until something happens. The reads are shared by every session of the Mac
+// (calls.ts), and what must survive a /reload-plugins lives in $.state.
 import { atom, read, update } from 'claude-code'
 import type { CommandRunInput, CommandRunResult, EngineInterface, Register, Timer } from 'claude-code'
-import type { PanelRow, PanelSnapshot } from '../types'
+import type { Armed, PanelAction, PanelRow, PanelSnapshot } from '../types'
+import { cacheDir, invalidate } from './cache.ts'
+import { freshAll, fresh, holderOf, known, publishSession, type Ctx, type Dew, type Key, type Known, type Menage, type Mrs, type NotionData, type Reviews } from './calls.ts'
 import {
   buildMrwatch,
   cardText,
@@ -14,14 +18,9 @@ import {
   dolmenRoot,
   findTicket,
   gitStatus,
-  glabMe,
+  lastCommitAt,
   lotDirs,
-  myBugs,
-  myMRs,
-  myScopes,
-  notionMe,
   pipelineCount,
-  reviewMRs,
   setStatus,
   sh,
   type MR,
@@ -49,8 +48,9 @@ import {
 } from './rules.ts'
 
 const TICK_MS = 2 * 60_000 // MRs: a pipeline takes ~20 min, two minutes is soon enough
-const SLOW_MS = 60 * 60_000 // Notion and the review list: once an hour, the Notion API allowance is small
 const READY_TTL_MS = 2 * 3_600_000
+const STALE_MS = 24 * 3_600_000 // a lot that has not moved for this long is said, with Reprendre
+const CONFIRM_MS = 10_000
 const TITLE = 'Dolmen'
 const PANE = 'dolmen-ops'
 const WINDOWS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
@@ -62,26 +62,50 @@ const ARROW = '' // the Powerline separator of the tmux status bar
 const EMPTY: PanelSnapshot = { at: 0, lots: [], mrs: [], reviews: [], bugs: [], dew: [], session: [] }
 // Bump the tag when PanelSnapshot changes: it declines what an older version stored.
 const snapshot = atom({ plugin: 'dolmen-ops', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-3' })
+// What must survive a /reload-plugins (module variables start over): the MR events already told, so a
+// reload does not wake a lot's agent twice on the same threads; /pret's go; the last turn's cost.
+const toldAtom = atom({ plugin: 'dolmen-ops', key: 'told' } as const, {} as Record<string, string>)
+const readyAtom = atom({ plugin: 'dolmen-ops', key: 'ready' } as const, {} as Record<string, number>)
+const usdAtom = atom({ plugin: 'dolmen-ops', key: 'lastUsd' } as const, -1)
+// The pane's action pressed once and waiting for « Oui ».
+const armed = atom({ plugin: 'dolmen-ops', key: 'armed' } as const, null as Armed)
 
-// Module state: a reload starts it over.
+// Module state: a reload starts it over. The reads below are copies of the shared state (calls.ts).
 let root: string | undefined
 let mrwatch: string[] = ['go', 'run', './.agents/skills/babysit-mr-empowill/mrwatch']
 let warming: Promise<void> | undefined
 // The lot this session works on (its branch names ET ids), or undefined: the Lead session, on main.
 let lotBranch: string | undefined
 let panelOn = false
-let slowAt = 0
 let quotaHigh = false
-let lastUsd: number | undefined
 const warned = new Set<string>()
-const told = new Map<number, string>() // MR → the events last told, so one wake per change
-const readyArmed = new Map<string, number>() // MR iid → until when /pret allows leaving Draft
 let mrs: { mr: MR; d?: Digest }[] = []
 let reviews: MR[] = []
 let bugs: Bug[] | undefined
 let dew: { id: string; title: string; priority: string; complexity: string; url: string }[] | undefined
-let me: string | undefined
+let menage: Menage | undefined
 let scopes: Scope[] = []
+
+const ctx = (): Ctx => ({ root: root!, mrwatch })
+
+// The shared reads into this session's copies.
+function apply(k: Known): void {
+  if (k.mrs?.data) mrs = k.mrs.data as Mrs
+  if (k.reviews?.data) reviews = (k.reviews.data as Reviews).list
+  if (k.notion?.data) {
+    const n = k.notion.data as NotionData
+    scopes = n.scopes
+    bugs = n.bugs
+  }
+  if (k.dew?.data) dew = k.dew.data as Dew
+  if (k.menage?.data) menage = k.menage.data as Menage
+}
+
+// After a write (a claim, a cleanup): every session of the Mac reads those again at its next tick.
+async function changed($: EngineInterface, keys: readonly Key[]): Promise<void> {
+  await invalidate($, keys).catch(() => {})
+  if (panelOn) $.clock.after(1, () => void refreshPanel($).catch(() => {}))
+}
 
 async function now($: EngineInterface) {
   return $.clock.now()
@@ -96,26 +120,34 @@ function handOff($: EngineInterface, text: string): void {
 
 // --- watching -------------------------------------------------------------------------------------
 
+// Each session reacts to the MRs on its own: a lot's session wakes for its own MR; the Lead sends an
+// MR's events to the lot's agent of this session, or tells Younes when no agent holds it here (the
+// pane's « Traiter » starts one). The reading is shared; the events told are kept in $.state.
 async function watchMRs($: EngineInterface): Promise<void> {
   if (!root) return
-  const list = await myMRs($)
-  if (!list) return
-  const next: typeof mrs = []
-  for (const mr of list) {
-    const d = await digest($, root, mrwatch, mr.iid)
-    next.push({ mr, d })
+  const e = await fresh($, ctx(), 'mrs')
+  if (!e?.data) return
+  apply({ mrs: e })
+  const told = await read($, toldAtom)
+  const next = { ...told }
+  for (const { mr, d } of mrs) {
     await syncStatus($, mr)
     const waking = d ? wakingEvents(d) : []
     const fp = waking.join(' ')
-    if (!waking.length || told.get(mr.iid) === fp) continue
-    told.set(mr.iid, fp)
-    // A lot's session wakes for its own MR only; the Lead session never wakes, it says where to go.
+    if (!waking.length || told[mr.iid] === fp) continue
+    next[mr.iid] = fp
+    if (lotBranch === mr.branch) {
+      handOff($, babysitPrompt(mr.iid, mr.title, d!))
+      continue
+    }
+    if (lotBranch) continue // another lot's MR: not this session's
+    // Another session working this lot wakes on it itself.
+    if ((await holderOf($, mr.branch).catch(() => 'free')) === 'other') continue
     const agent = (await lotAgents($))[mr.branch]
-    if (agent && !lotBranch) await $.session.send({ to: { agentId: agent }, text: babysitPrompt(mr.iid, mr.title, d!) })
-    else if (lotBranch === mr.branch) handOff($, babysitPrompt(mr.iid, mr.title, d!))
-    else if (!lotBranch) void $.ui.notify(`!${mr.iid} ${fp} → ccw attach ${mr.branch}`, { title: TITLE })
+    const sent = agent ? await $.session.send({ to: { agentId: agent }, text: babysitPrompt(mr.iid, mr.title, d!) }).catch(() => ({ isDelivered: false as const })) : undefined
+    if (!sent?.isDelivered) void $.ui.notify(`!${mr.iid} ${fp} → « Traiter » dans le panneau Dolmen (l'agent du lot s'en charge)`, { title: TITLE })
   }
-  mrs = next
+  await update($, toldAtom, () => next).catch(() => {})
 }
 
 // An open MR moves its tickets from In Progress to « Merge request » (gitlab-sync is not merged yet).
@@ -130,16 +162,13 @@ async function syncStatus($: EngineInterface, mr: MR): Promise<void> {
   }
 }
 
-async function watchSlow($: EngineInterface, force = false): Promise<void> {
-  const t = await now($)
-  if (!root || (!force && t - slowAt < SLOW_MS)) return
-  slowAt = t
-  me ??= await notionMe($, root)
-  if (me && !scopes.length) scopes = await myScopes($, root, me)
-  bugs = me ? await myBugs($, root, me, scopes) : undefined
-  dew = (await dewList($, root))?.map(d => ({ id: d.id, title: d.title, priority: d.priority, complexity: d.complexity, url: d.url }))
-  const user = await glabMe($)
-  reviews = user ? ((await reviewMRs($, user)) ?? []) : []
+// What this session holds, for the other sessions of the Mac: its own branch (a lot session), or the
+// lots whose agents run here (the Lead).
+async function publishMine($: EngineInterface): Promise<void> {
+  const agents = await lotAgents($)
+  const live = new Set((await $.agent.list().catch(() => [])).map(a => a.id))
+  const branches = lotBranch ? [lotBranch] : Object.entries(agents).filter(([, id]) => live.has(id)).map(([b]) => b)
+  await publishSession($, { lead: !lotBranch, branches }).catch(() => {})
 }
 
 // The ticker. A /clear ends the session's timers with it (no session.start follows), so every hook
@@ -160,29 +189,44 @@ async function tick($: EngineInterface): Promise<void> {
   if (!root) return
   lastTick = await now($)
   await watchMRs($).catch(() => {})
-  if (panelOn) {
-    await watchSlow($).catch(() => {})
-    await refreshPanel($).catch(() => {})
-  }
+  await publishMine($).catch(() => {})
+  if (panelOn) await refreshPanel($).catch(() => {})
 }
 
 // --- the panel and /etat --------------------------------------------------------------------------
 
-function bugRows(t: number): PanelRow[] {
+// Whether this session may act on a lot's branch: its own (a lot session), or, from the Lead, one no
+// other session works. Elsewhere the row says so and has no button: two sessions never work one lot.
+async function mineToAct($: EngineInterface, branch: string): Promise<boolean> {
+  if (lotBranch) return lotBranch === branch
+  return (await holderOf($, branch).catch(() => 'free' as const)) !== 'other'
+}
+
+// A ticket already in one of this Mac's lots.
+async function inALot($: EngineInterface, id: string): Promise<boolean> {
+  return !!root && (await lotDirs($, root)).some(l => ticketIds(l.name).includes(id))
+}
+
+const take = (id: string): PanelAction => ({ id: `take:${id}`, label: 'Prendre', confirm: `Prendre ${id} (claim Notion, branche, worktree) ?` })
+
+async function bugRows($: EngineInterface, t: number): Promise<PanelRow[]> {
   if (!bugs) return [{ label: 'Notion', value: 'injoignable (NOTION_TOKEN ?)', tone: 'subtle' }]
   if (!bugs.length) return [{ label: '—', value: 'aucun bug ouvert dans tes scopes', tone: 'success' }]
-  return sortBugs(bugs, t)
-    .slice(0, 8)
-    .map(b => {
-      const s = slo(b, t)
-      const who = b.mine ? 'À TOI' : b.assignees.length ? 'pris' : 'personne'
-      return {
-        label: `${b.id} ${b.title}`,
-        href: b.url,
-        value: `${b.priority || 'sans priorité'} · ${s.age} j${s.limit ? ` / ${s.limit} j` : ''} · ${who}`,
-        tone: s.late ? 'error' : !b.priority ? 'warning' : b.mine ? 'warning' : 'subtle',
-      }
+  const rows: PanelRow[] = []
+  for (const b of sortBugs(bugs, t).slice(0, 8)) {
+    const s = slo(b, t)
+    const who = b.mine ? 'À TOI' : b.assignees.length ? 'pris' : 'personne'
+    // Taking a bug is the Lead's gesture: one nobody holds, or mine not yet in a lot.
+    const free = !lotBranch && (!b.assignees.length || b.mine) && !(await inALot($, b.id))
+    rows.push({
+      label: `${b.id} ${b.title}`,
+      href: b.url,
+      value: `${b.priority || 'sans priorité'} · ${s.age} j${s.limit ? ` / ${s.limit} j` : ''} · ${who}`,
+      tone: s.late ? 'error' : !b.priority ? 'warning' : b.mine ? 'warning' : 'subtle',
+      ...(free ? { action: take(b.id) } : {}),
     })
+  }
+  return rows
 }
 
 async function sessionRows($: EngineInterface): Promise<PanelRow[]> {
@@ -203,7 +247,7 @@ async function sessionRows($: EngineInterface): Promise<PanelRow[]> {
       rows.push({ label: 'Coût du lot', value: [cost !== undefined ? `${cost.toFixed(2)} $` : '', pipelines !== undefined ? `${pipelines} pipelines` : ''].filter(Boolean).join(' · ') })
     }
   }
-  rows.push(lotBranch ? { label: 'Rôle', value: 'session de lot : se réveille sur sa MR', tone: 'success' } : { label: 'Rôle', value: 'session Lead : notifie, ne code pas', tone: 'subtle' })
+  rows.push(lotBranch ? { label: 'Rôle', value: 'session de lot : se réveille sur sa MR', tone: 'success' } : { label: 'Rôle', value: 'session Lead : ses lots sont ses agents', tone: 'subtle' })
   for (const l of (await $.session.usage()).rateLimits) {
     rows.push({
       label: `Quota ${WINDOWS[l.kind] ?? l.kind.replace('_', ' ')}`,
@@ -214,39 +258,56 @@ async function sessionRows($: EngineInterface): Promise<PanelRow[]> {
   return rows
 }
 
+// The pane's state: first from what this Mac already knows, with no call (a new session, a /clear or
+// a reload draws at once), then from what is due, read once for every session of the Mac.
 async function refreshPanel($: EngineInterface, force = false): Promise<void> {
-  if (force) {
-    await watchMRs($).catch(() => {})
-    await watchSlow($, true).catch(() => {})
+  if (!root) return
+  if ((await read($, snapshot)).at === 0) {
+    apply(await known($))
+    if (mrs.length || bugs || dew) await compose($)
   }
-  const t = await now($)
-  const mrRows: PanelRow[] = mrs.length
-    ? mrs.flatMap(({ mr, d }) => {
-        const v = d ? mrValue(d) : { value: 'mrwatch injoignable (glab auth status ?)', tone: 'subtle' as const }
-        const row: PanelRow = { label: `!${mr.iid} ${mr.tickets.join(' + ') || mr.title}`, href: mr.url, ...v }
-        const threads = (d?.threads ?? []).slice(0, 2).map(th => ({ label: `  ${th.author}`, value: th.where || 'fil général', tone: 'subtle' as const }))
-        return [row, ...threads]
-      })
-    : [{ label: '—', value: 'aucune MR ouverte', tone: 'subtle' }]
-  const reviewRows: PanelRow[] = reviews.length
-    ? reviews.map(r => ({ label: `!${r.iid} ${r.tickets.join(' + ') || r.title} (${r.author})`, href: r.url, value: `demandée · ${ago(t - Date.parse(r.updatedAt))}`, tone: 'warning' }))
-    : [{ label: '—', value: 'rien à relire', tone: 'subtle' }]
-  const dewRows: PanelRow[] = !dew
-    ? [{ label: 'task dew', value: 'injoignable', tone: 'subtle' }]
-    : dew.length
-      ? dew.slice(0, 6).map(d => ({ label: `${d.id} ${d.title}`, href: d.url, value: `${d.priority} · ${d.complexity}`, tone: d.priority === 'Critical' ? 'error' : undefined }))
-      : [{ label: '—', value: 'aucun ticket Ready', tone: 'subtle' }]
-  const session = await sessionRows($)
-  const lots = await lotRows($)
-  await update($, snapshot, () => ({ at: t, lots, mrs: mrRows, reviews: reviewRows, bugs: bugRows(t), dew: dewRows, session }))
+  apply(await freshAll($, ctx(), force))
+  await compose($)
 }
 
-// Everything slow (go build of mrwatch, `task dew` compiling the dolmen CLI, Notion, glab) runs here,
-// in the background: commands answer from what it last read and never wait on it.
-function warm($: EngineInterface): Promise<void> {
+async function compose($: EngineInterface): Promise<void> {
+  const t = await now($)
+  const mrRows: PanelRow[] = []
+  for (const { mr, d } of mrs) {
+    const v = d ? mrValue(d) : { value: 'mrwatch injoignable (glab auth status ?)', tone: 'subtle' as const }
+    const moved = ` · bougée il y a ${ago(t - Date.parse(mr.updatedAt))}`
+    const own = await mineToAct($, mr.branch)
+    // Threads, a red pipeline or a conflict: Traiter (the lot's agent). Green, no thread, Draft: Prête.
+    const busy = !!d && (wakingEvents(d).length > 0 || d.openThreads > 0 || d.pipeline === 'failed' || d.failed.length > 0 || !!d.conflicts)
+    const ready = !!d && d.draft && d.pipeline === 'success' && !d.openThreads && !d.conflicts && !d.failed.length
+    const action: PanelAction | undefined = !own ? undefined : busy ? { id: `treat:${mr.iid}`, label: 'Traiter' } : ready ? { id: `ready:${mr.iid}`, label: 'Prête', confirm: `!${mr.iid} : verify, recette, qa-will, puis sortie de Draft ?` } : undefined
+    mrRows.push({ label: `!${mr.iid} ${mr.tickets.join(' + ') || mr.title}`, href: mr.url, ...v, value: `${v.value}${moved}${own ? '' : ' · autre session'}`, ...(action ? { action } : {}) })
+    for (const th of (d?.threads ?? []).slice(0, 2)) mrRows.push({ label: `  ${th.author}`, value: th.where || 'fil général', tone: 'subtle' })
+  }
+  if (!mrRows.length) mrRows.push({ label: '—', value: 'aucune MR ouverte', tone: 'subtle' })
+  const reviewRows: PanelRow[] = reviews.length
+    ? reviews.map(r => ({ label: `!${r.iid} ${r.tickets.join(' + ') || r.title} (${r.author})`, href: r.url, value: `demandée · ${ago(t - Date.parse(r.updatedAt))}`, tone: 'warning' as const, ...(lotBranch ? {} : { action: { id: `review:${r.iid}`, label: 'Relire' } }) }))
+    : [{ label: '—', value: 'rien à relire', tone: 'subtle' }]
+  const dewRows: PanelRow[] = []
+  if (!dew) dewRows.push({ label: 'task dew', value: 'injoignable', tone: 'subtle' })
+  else if (!dew.length) dewRows.push({ label: '—', value: 'aucun ticket Ready', tone: 'subtle' })
+  else
+    for (const [i, d] of dew.slice(0, 6).entries()) {
+      const first = i === 0 && !lotBranch && !(await inALot($, d.id))
+      dewRows.push({ label: `${d.id} ${d.title}`, href: d.url, value: `${d.priority} · ${d.complexity}`, tone: d.priority === 'Critical' ? 'error' : undefined, ...(first ? { action: take(d.id) } : {}) })
+    }
+  const session = await sessionRows($)
+  const lots = await lotRows($, t)
+  const bugList = await bugRows($, t)
+  await update($, snapshot, () => ({ at: t, lots, mrs: mrRows, reviews: reviewRows, bugs: bugList, dew: dewRows, session }))
+}
+
+// The slow part (the shared mrwatch build, then every read) runs here, in the background: commands
+// answer from what is known and never wait on it.
+function warm($: EngineInterface, force = false): Promise<void> {
   warming ??= (async () => {
-    if (root && mrwatch[0] === 'go') mrwatch = await buildMrwatch($, root).catch(() => mrwatch)
-    await refreshPanel($, true).catch(() => {})
+    if (root && mrwatch[0] === 'go') mrwatch = await buildMrwatch($, root, await cacheDir($)).catch(() => mrwatch)
+    await refreshPanel($, force).catch(() => {})
   })().finally(() => {
     warming = undefined
   })
@@ -279,7 +340,7 @@ const PROMPTS = {
   note: 'Mets à jour la section « État » de la description de la MR de ce lot : fait (avec preuves), reste, prochaine commande. Aucun push.',
   detacher: (id: string) =>
     [
-      `Sors ${id} de ce lot sans réécrire l'historique poussé : crée la branche ${id}-<slug> depuis origin/main dans le dossier des worktrees de ccw,`,
+      `Sors ${id} de ce lot sans réécrire l'historique poussé : crée la branche ${id}-<slug> depuis origin/main dans son propre worktree, à côté de celui du lot,`,
       `cherry-pick les commits \`[${id}]\` du lot, puis ajoute dans le lot un commit qui les revert. Retire [${id}] du titre et son lien de la MR. Montre-moi le plan avant de pousser.`,
     ].join('\n'),
   pret: (iid: number) =>
@@ -327,7 +388,9 @@ async function lotAgents($: EngineInterface): Promise<Record<string, string>> {
 
 const AGENT_STATE: Record<string, string> = { pending: 'démarre', running: 'travaille', waiting: 'attend', idle: 'attend ta réponse', completed: 'a fini son tour', failed: 'en échec', killed: 'arrêté' }
 
-async function lotRows($: EngineInterface): Promise<PanelRow[]> {
+// Each lot with its agent, its branch, its MR and how long since it moved (its MR, else its last
+// commit): past a day, orange with Reprendre. Then what /menage go would remove.
+async function lotRows($: EngineInterface, t: number): Promise<PanelRow[]> {
   if (!root) return []
   const agents = await lotAgents($)
   const list = await $.agent.list().catch(() => [])
@@ -336,12 +399,22 @@ async function lotRows($: EngineInterface): Promise<PanelRow[]> {
     const s = await gitStatus($, lot.dir)
     const mr = mrs.find(m => m.mr.branch === lot.name)
     const agent = list.find(a => a.id === agents[lot.name])
+    const own = await mineToAct($, lot.name)
+    const movedAt = mr ? Date.parse(mr.mr.updatedAt) : await lastCommitAt($, lot.dir)
+    const age = movedAt ? t - movedAt : undefined
     const parts = [
-      agent ? `agent : ${AGENT_STATE[agent.status] ?? agent.status}` : agents[lot.name] ? 'agent fermé' : 'pas d\'agent (/plan)',
+      !own ? 'autre session' : agent ? `agent : ${AGENT_STATE[agent.status] ?? agent.status}` : agents[lot.name] ? 'agent fermé' : 'pas d\'agent (/plan)',
       !s ? '' : s.upstream !== `origin/${lot.name}` ? (s.ahead || s.dirty ? 'pas encore poussée' : '') : s.ahead ? `${s.ahead} commits locaux` : '',
       mr ? `!${mr.mr.iid}${mr.d ? ` ${mrValue(mr.d).value}` : ''}` : '',
+      age !== undefined ? `bougé il y a ${ago(age)}` : '',
     ].filter(Boolean)
-    rows.push({ label: lot.name, href: mr?.mr.url, value: parts.join(' · '), tone: mr?.d ? mrValue(mr.d).tone : agent?.status === 'idle' ? 'warning' : undefined })
+    const stale = age !== undefined && age >= STALE_MS && !(mr?.d && wakingEvents(mr.d).length)
+    const tone = mr?.d ? mrValue(mr.d).tone : agent?.status === 'idle' || stale ? 'warning' : undefined
+    rows.push({ label: lot.name, href: mr?.mr.url, value: parts.join(' · '), tone: stale && tone === 'success' ? 'warning' : tone, ...(stale && own ? { action: { id: `resume:${lot.name}`, label: 'Reprendre' } } : {}) })
+  }
+  if (menage?.done.length && !lotBranch) {
+    const n = menage.done.length
+    rows.push({ label: 'À nettoyer', value: `${n} worktree${n > 1 ? 's' : ''} déjà dans main`, action: { id: 'menage', label: 'Nettoyer', confirm: `Supprimer ${n} worktree${n > 1 ? 's' : ''} mergé${n > 1 ? 's' : ''} et leur branche locale ?` } })
   }
   return rows.length ? rows : [{ label: '—', value: 'aucun lot ouvert (/ticket ET-…)', tone: 'subtle' }]
 }
@@ -420,7 +493,17 @@ async function cmdDetacher($: EngineInterface, e: CommandRunInput): Promise<Comm
   return { text: await toLot($, e.args ?? '', PROMPTS.detacher(id)) }
 }
 
-// Leaving Draft is the author's call: only a /pret typed by Younes allows it, for that MR, for 2 h.
+// Leaving Draft is the author's call: only a /pret typed by Younes, or his press on « Prête », allows
+// it, for that MR, for 2 h (kept in $.state, so a reload does not take it back).
+async function pretFor($: EngineInterface, iid: number, args: string): Promise<string> {
+  if (!root) return 'Pas dans Dolmen.'
+  const d = await digest($, root, mrwatch, iid)
+  if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) return `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.`
+  const until = (await now($)) + READY_TTL_MS
+  await update($, readyAtom, r => ({ ...r, [String(iid)]: until }))
+  return `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅. ${await toLot($, args, PROMPTS.pret(iid))}`
+}
+
 async function cmdPret($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
   if (e.origin.kind !== 'composer') return { text: '/pret ne s’exécute que tapé par toi.' }
   const args = e.args ?? ''
@@ -428,12 +511,7 @@ async function cmdPret($: EngineInterface, e: CommandRunInput): Promise<CommandR
   const lotMr = typeof lot === 'object' ? mrs.find(m => m.mr.branch === lot.name)?.mr.iid : undefined
   const iid = Number(/\d+/.exec(args.replace(/\bET[-_]\d+/gi, ''))?.[0]) || lotMr || (await here($)).iid
   if (!iid || !root) return { text: 'Aucune MR pour cette branche. Usage : /pret 2961' }
-  const d = await digest($, root, mrwatch, iid)
-  if (d && (d.pipeline === 'failed' || d.failed.length || d.conflicts)) {
-    return { text: `!${iid} n'est pas prête : ${mrValue(d).value}. Le babysit d'abord.` }
-  }
-  readyArmed.set(String(iid), (await now($)) + READY_TTL_MS)
-  return { text: `!${iid} : verify, recette, qa-will, puis sortie de Draft si tout est ✅. ${await toLot($, args, PROMPTS.pret(iid))}` }
+  return { text: await pretFor($, iid, args) }
 }
 
 async function cmdRelire($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
@@ -453,7 +531,7 @@ async function cmdBugs($: EngineInterface, e: CommandRunInput): Promise<CommandR
   $.clock.after(1, () => void warm($))
   if (!bugs) return { text: LOADING }
   const t = await now($)
-  const rows = bugRows(t)
+  const rows = await bugRows($, t)
   const lead = scopes.filter(s => s.role === 'Lead').map(s => s.name)
   return { text: [`Bugs ouverts de tes scopes${lead.length ? ` (Lead : ${lead.join(', ')})` : ''}, en jours ouvrés contre le SLO :`, ...rows.map(r => `  ${r.label} : ${r.value}`)].join('\n') }
 }
@@ -466,22 +544,81 @@ async function cmdMenage($: EngineInterface, e: CommandRunInput): Promise<Comman
   if (!root) return { text: 'Pas dans Dolmen.' }
   const s = await sweep($, root)
   const lines = [...s.done.map(l => `mergé, propre : ${l.name}`), ...s.dirty.map(n => `mergé mais modifié (gardé) : ${n}`)]
-  if ((e.args ?? "").trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (ccw rm).' : ''].join('\n') : 'Rien à nettoyer.' }
+  if ((e.args ?? "").trim() !== 'go') return { text: lines.length ? [...lines, '', s.done.length ? 'Tape « /menage go » pour les supprimer (worktree et branche locale, jamais forcé).' : ''].join('\n') : 'Rien à nettoyer.' }
   if (e.origin.kind !== 'composer') return { text: '/menage go ne s’exécute que tapé par toi.' }
-  return { text: (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.' }
+  const done = (await sweepApply($, root, s)).join('\n') || 'Rien à nettoyer.'
+  await changed($, ['menage'])
+  return { text: done }
 }
 
 async function cmdPanneau($: EngineInterface, e: CommandRunInput): Promise<CommandRunResult> {
   panelOn = true
   await $.ui.open({ id: PANE, title: 'Dolmen', backgroundColor: 'transparent' })
   $.clock.after(1, () => void warm($))
-  return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, Notion et relectures toutes les heures.' }
+  return { text: 'Panneau Dolmen ouvert : MR toutes les 2 min, relectures toutes les 10 min, Notion toutes les heures, lus une fois pour toutes les sessions de ce Mac (~/.cache/dolmen-ops).' }
+}
+
+// --- the pane's buttons -------------------------------------------------------------------------
+// A Button is pressed by a person, never by a model: a press is Younes's gesture, as if typed. The ones
+// that write (Prendre: a Notion claim; Prête; Nettoyer) ask « Oui / Non » first. Nothing is posted on
+// GitLab without his OK: the agents' own rules say so, the buttons only start them.
+
+const RESUME =
+  'Ce lot n\'a pas bougé depuis plus d\'un jour. Relis la section « État » de sa MR (ou ses derniers commits), puis reprends-le, ou dis à Younes en deux lignes ce qui le bloque.'
+
+async function act($: EngineInterface, id: string): Promise<void> {
+  const [kind, arg = ''] = [id.split(':')[0], id.slice(id.indexOf(':') + 1)]
+  switch (kind) {
+    case 'treat': {
+      const m = mrs.find(x => String(x.mr.iid) === arg)
+      if (!m?.d) return void $.ui.toast(`!${arg} : pas de digest mrwatch pour l'instant.`)
+      const text = babysitPrompt(m.mr.iid, m.mr.title, m.d)
+      if (lotBranch) return handOff($, text)
+      return void $.ui.toast(await toLot($, ticketIds(m.mr.branch).join(' '), text))
+    }
+    case 'ready':
+      return void $.ui.toast(await pretFor($, Number(arg), ''))
+    case 'review':
+      return handOff($, PROMPTS.relire(arg))
+    case 'take': {
+      if (!root) return
+      const opened = await lotOpen($, root, [arg])
+      $.ui.toast(opened.text.split('\n')[0]!)
+      await changed($, ['dew', 'notion', 'menage'])
+      return
+    }
+    case 'resume':
+      return void $.ui.toast(await toLot($, ticketIds(arg).join(' '), RESUME))
+    case 'menage': {
+      if (!root) return
+      const done = await sweepApply($, root, await sweep($, root))
+      $.ui.toast(done.length ? `Nettoyé : ${done.join(' · ')}` : 'Rien à nettoyer.')
+      await changed($, ['menage'])
+      return
+    }
+  }
+}
+
+async function press($: EngineInterface, a: PanelAction): Promise<void> {
+  if (!a.confirm) return act($, a.id)
+  const at = await now($)
+  await update($, armed, () => ({ id: a.id, at }))
+  $.clock.after(CONFIRM_MS, () => void disarm($, a.id, at))
+}
+
+async function disarm($: EngineInterface, id?: string, at?: number): Promise<void> {
+  await update($, armed, cur => (!id || (cur?.id === id && cur.at === at) ? null : cur))
+}
+
+async function confirmed($: EngineInterface, id: string): Promise<void> {
+  await disarm($)
+  await act($, id)
 }
 
 // --- registration ---------------------------------------------------------------------------------
 
 const COMMANDS: [string, string][] = [
-  ['ticket', 'Dolmen : prend un ou plusieurs tickets (ET-…) et ouvre leur lot : claim Notion, branche, worktree ccw'],
+  ['ticket', 'Dolmen : prend un ou plusieurs tickets (ET-…) et ouvre leur lot : claim Notion, branche, worktree'],
   ['ajouter', 'Dolmen : ajoute un ticket (ET-…) au lot de ce worktree'],
   ['detacher', 'Dolmen : sort un ticket (ET-…) de ce lot vers sa propre branche'],
   ['plan', 'Dolmen : grill + contrôles readiness + test plan du lot'],
@@ -493,7 +630,7 @@ const COMMANDS: [string, string][] = [
   ['bugs', 'Dolmen : les bugs de tes scopes, classés par SLO'],
   ['etat', 'Dolmen : MR, relectures, bugs, DEW, coût du lot, quota'],
   ['panneau', 'Dolmen : ouvre le panneau'],
-  ['menage', 'Dolmen : les worktrees de lots déjà mergés. /menage go les supprime (ccw rm)'],
+  ['menage', 'Dolmen : les worktrees de lots déjà mergés. /menage go les supprime (worktree et branche locale)'],
 ]
 
 export const register: Register = on => {
@@ -579,9 +716,10 @@ export const register: Register = on => {
     const { Box, Text, Button, Link } = $.ui.resolve(e)
     panelOn = true // a pane still open after a reload keeps refreshing
     const s = await read($, snapshot)
+    const waiting = await read($, armed)
     void ensureTicker($)
     // An empty snapshot after a /clear or a reload: redraw from what is in memory, then read anew.
-    if (s.at === 0) $.clock.after(1, () => void (mrs.length || bugs || dew ? refreshPanel($) : warm($)))
+    if (s.at === 0) $.clock.after(1, () => void warm($))
     const width = Math.max(20, e.props.bodyColumns)
     const section = (title: string, rows: PanelRow[]) => (
       <Box flexDirection="column" marginBottom={1} width={width}>
@@ -591,20 +729,39 @@ export const register: Register = on => {
           </Text>
           <Text color={EF.green}>{ARROW}</Text>
         </Text>
-        {rows.map(r => (
-          <Box flexDirection="row" justifyContent="space-between" width={width}>
-            <Box flexShrink={1} marginRight={1}>
-              <Text wrap="truncate-end" color={r.tone === 'subtle' ? EF.grey : EF.fg}>
-                {r.href ? <Link href={r.href}>{r.label}</Link> : r.label}
-              </Text>
+        {rows.map(r => {
+          const a = r.action
+          // An action pressed once that asks twice: its question and « Oui / Non » in place of the value.
+          const asking = !!a && waiting?.id === a.id
+          const shown = asking ? (a.confirm ?? '') : r.value
+          const buttons = a ? (asking ? [<Button key={`yes:${a.id}`} label="Oui" variant="primary" onPress={() => void confirmed($, a.id)} />, <Button key={`no:${a.id}`} label="Non" onPress={() => void disarm($)} />] : [<Button key={`act:${a.id}`} label={a.label} variant="primary" onPress={() => void press($, a)} />]) : []
+          // The terminal draws a Button as `[ label ]`: without room on the row it goes on the next line.
+          const inline = r.label.length + shown.length + (a ? (asking ? 14 : a.label.length + 5) : 0) + 2 <= width
+          const line = (
+            <Box flexDirection="row" justifyContent="space-between" width={width}>
+              <Box flexShrink={1} marginRight={1}>
+                <Text wrap="truncate-end" color={r.tone === 'subtle' ? EF.grey : EF.fg}>
+                  {r.href ? <Link href={r.href}>{r.label}</Link> : r.label}
+                </Text>
+              </Box>
+              <Box flexShrink={0} flexDirection="row" gap={1}>
+                <Text color={asking ? EF.yellow : r.tone ? TONE[r.tone] : EF.fg} bold={asking || r.tone === 'error'}>
+                  {shown}
+                </Text>
+                {inline && buttons}
+              </Box>
             </Box>
-            <Box flexShrink={0}>
-              <Text color={r.tone ? TONE[r.tone] : EF.fg} bold={r.tone === 'error'}>
-                {r.value}
-              </Text>
+          )
+          if (inline || !buttons.length) return line
+          return (
+            <Box flexDirection="column" width={width}>
+              {line}
+              <Box flexDirection="row" justifyContent="flex-end" gap={1} width={width}>
+                {buttons}
+              </Box>
             </Box>
-          </Box>
-        ))}
+          )
+        })}
       </Box>
     )
     const t = await now($)
@@ -618,7 +775,7 @@ export const register: Register = on => {
         {s.at > 0 && section('MON DEW', s.dew)}
         {s.at > 0 && section('SESSION', s.session)}
         <Box flexDirection="row" gap={1}>
-          <Button key="refresh" label="Rafraîchir" onPress={() => void warm($)} />
+          <Button key="refresh" label="Rafraîchir" onPress={() => void warm($, true)} />
           <Button key="next" label="Ticket suivant" onPress={() => void showNext($)} />
           <Button key="note" label="Note d'état sur la MR" onPress={() => void toLot($, '', PROMPTS.note)} />
         </Box>
@@ -631,7 +788,8 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (!root) return next(e)
     const t = await now($)
-    const why = refusal(e.command, mr => (readyArmed.get(mr) ?? 0) > t)
+    const ready = await read($, readyAtom).catch(() => ({}) as Record<string, number>)
+    const why = refusal(e.command, mr => (ready[mr] ?? 0) > t)
     if (why) return { deny: why }
     for (const dir of amendIn(e.command)) {
       const pushed = await sh($, ['git', 'branch', '-r', '--contains', 'HEAD'], dir)
@@ -646,8 +804,9 @@ export const register: Register = on => {
     if (!root) return done
     const usd = (await $.session.usage()).cost?.usd
     if (usd === undefined) return done
-    const spent = lastUsd === undefined ? 0 : Math.max(0, usd - lastUsd)
-    lastUsd = usd
+    const last = await read($, usdAtom).catch(() => -1)
+    const spent = last < 0 ? 0 : Math.max(0, usd - last)
+    await update($, usdAtom, () => usd).catch(() => {})
     const branch = (await gitStatus($, await $.session.cwd()))?.branch
     if (spent && branch && ticketIds(branch).length) {
       const cost = ((await $.store.get('cost')) as Record<string, number> | undefined) ?? {}
