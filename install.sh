@@ -69,6 +69,17 @@ install_file() {
   sed "s|__HOME__|$HOME|g" "$src" > "$dest"
   echo "  copié    -> $dest"
 }
+# FUSIONNE un JSON du repo dans celui de la machine : les clés du repo gagnent, les autres
+# restent (plugins activés, réglages écrits par Claude Code comme ceux de /auto-mode-setup).
+# Sans fichier existant ou sans jq, copie simple.
+merge_json() {
+  local src="$1" dest="$2" tmp
+  if [ ! -f "$dest" ] || ! command -v jq >/dev/null 2>&1; then install_file "$src" "$dest"; return; fi
+  backup "$dest"
+  tmp="$(mktemp)"
+  sed "s|__HOME__|$HOME|g" "$src" | jq -s '.[0] * .[1]' "$dest" - > "$tmp" && mv "$tmp" "$dest"
+  echo "  fusionné -> $dest"
+}
 # LIE un fichier/dossier au repo : éditer ~/dotfiles est actif immédiatement,
 # sans relancer ./install.sh. Interdit si le fichier contient __HOME__ (pas de
 # sed sur un lien) ou si l'outil réécrit sa config (il écrirait dans le repo).
@@ -95,8 +106,8 @@ say "Installation des configs"
 install_file "$DOTFILES/alacritty/alacritty.toml" "$HOME/.config/alacritty/alacritty.toml"
 # lazygit réécrit son config.yml quand on change un réglage dans l'UI
 install_file "$DOTFILES/lazygit/config.yml"       "$HOME/Library/Application Support/lazygit/config.yml"
-# Claude Code réécrit settings.json (thème via /config) + contient __HOME__
-install_file "$DOTFILES/claude/settings.json"     "$HOME/.claude/settings.json"
+# Claude Code réécrit settings.json (thème via /config, plugins, auto-mode) + contient __HOME__ : fusionné, pas écrasé
+merge_json   "$DOTFILES/claude/settings.json"     "$HOME/.claude/settings.json"
 
 # -- LIÉS au repo (éditer ~/dotfiles est actif tout de suite) --
 link_file "$DOTFILES/tmux/tmux.conf"              "$HOME/.tmux.conf"
