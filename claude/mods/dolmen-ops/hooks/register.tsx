@@ -452,17 +452,29 @@ async function toLot($: EngineInterface, args: string, text: string): Promise<st
     const sent = await $.session.send({ to: { agentId: known }, text }).catch(() => ({ isDelivered: false as const }))
     if (sent.isDelivered) return `→ agent du lot ${lot.name}.`
   }
-  $.clock.after(1, () => void startLotAgent($, lot.name, lot.dir, text))
-  return `Agent du lot ${lot.name} démarré dans son worktree. Il apparaît dans tes agents et dans « Lots en cours ».`
+  // The model starts the agent with its own Agent tool, on the owner's typed command: a plugin's own
+  // $.agent.spawn is refused by the auto mode classifier (2026-11-02, « The server-side auto mode
+  // classifier gave… »), and the reply then claimed a start that never happened.
+  handOff($, LOT_START(lot.name, lot.dir, text))
+  return `La session lance l'agent du lot ${lot.name} (outil Agent, en arrière-plan) : il apparaîtra dans tes agents et dans « Lots en cours ». Si le lancement est refusé, la session le dit ici.`
 }
 
-async function startLotAgent($: EngineInterface, name: string, dir: string, text: string): Promise<void> {
-  const r = await $.agent.spawn({ prompt: `${lotBrief(name, dir)}\n\n${text}`, description: `Lot ${ticketIds(name).join('+')}`, cwd: dir })
-  if (!('agentId' in r) || !r.agentId) {
-    $.ui.toast(`L'agent du lot ${name} n'a pas démarré${'deny' in r ? ` : ${r.deny}` : ''}`)
-    return
-  }
-  await $.store.set('lotAgents', { ...(await lotAgents($)), [name]: r.agentId })
+const LOT_START = (name: string, dir: string, text: string) =>
+  [
+    `Younes a tapé une commande pour le lot ${name}. Lance maintenant un sous-agent avec ton outil Agent, en arrière-plan, description « Lot ${ticketIds(name).join('+')} », avec exactement ce brief :`,
+    '',
+    `${lotBrief(name, dir)}\n\n${text}`,
+    '',
+    'Puis dis en une ligne qu\'il est lancé. Si le lancement est refusé, dis-le avec la raison.',
+  ].join('\n')
+
+// The agent a lot's command asked for: the model starts it (LOT_START), and its id is kept here so that
+// the lot's next commands and MR events go to it.
+async function rememberLotAgent($: EngineInterface, description: string, agentId: string | undefined): Promise<void> {
+  if (!agentId || !root || !/^Lot ET-/.test(description)) return
+  const ids = ticketIds(description)
+  const lot = (await lotDirs($, root)).find(l => ids.length && ids.every(id => ticketIds(l.name).includes(id)))
+  if (lot) await $.store.set('lotAgents', { ...(await lotAgents($)), [lot.name]: agentId })
 }
 
 // --- commands -----------------------------------------------------------------------------------
@@ -634,6 +646,12 @@ const COMMANDS: [string, string][] = [
 ]
 
 export const register: Register = on => {
+  // The lot agent the model starts for a lot's command: its id is kept for the lot (LOT_START).
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    if (root && 'agentId' in started) await rememberLotAgent($, e.description, started.agentId).catch(() => {})
+    return started
+  }).catch(($, e, next) => next(e))
   on('session.start', async ($, e, next) => {
     root = await dolmenRoot($, e.cwd).catch(() => undefined)
     if (!root) return next(e) // not a Dolmen session: the mod stays quiet

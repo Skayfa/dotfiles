@@ -157,17 +157,23 @@ test('in a lot session, /plan hands its prompt to the model once the command has
   expect(prompts[0]).toContain('grill')
 })
 
-test('from the Lead, /plan starts the lot agent in its worktree with the lot brief', async ($, on) => {
-  const { prompts, clock, spawned } = world(on, { dirs: { [HOME]: ['ET-4449-ET-4481-competences'] }, answer: withBranch(dolmen({})) })
+test('from the Lead, /plan asks the session to start the lot agent with its Agent tool, and keeps its id', async ($, on) => {
+  const { prompts, clock, spawned, sent } = world(on, { dirs: { [HOME]: ['ET-4449-ET-4481-competences'] }, answer: withBranch(dolmen({})) })
   await $.session.start(START)
-  expect((await $.command.run({ command: 'plan', args: 'ET-4481', ...TYPED })).text).toContain('Agent du lot ET-4449-ET-4481-competences démarré')
+  expect((await $.command.run({ command: 'plan', args: 'ET-4481', ...TYPED })).text).toContain("La session lance l'agent du lot ET-4449-ET-4481-competences")
   await clock.advance(10)
   await clock.settle()
-  expect(spawned).toHaveLength(1)
-  expect(spawned[0]!.cwd).toBe(LOT)
-  expect(spawned[0]!.prompt).toContain('uniquement dans ' + LOT)
-  expect(spawned[0]!.prompt).toContain('grill')
-  expect(prompts).toHaveLength(0)
+  // No spawn by the plugin (the auto mode classifier refuses it): the model gets the brief.
+  expect(spawned).toHaveLength(0)
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('outil Agent')
+  expect(prompts[0]).toContain('« Lot ET-4449+ET-4481 »')
+  expect(prompts[0]).toContain('uniquement dans ' + LOT)
+  expect(prompts[0]).toContain('grill')
+  // The model's spawn of that agent: its id becomes the lot's, so the next command goes to it.
+  await $.agent.spawn({ prompt: 'brief', description: 'Lot ET-4449+ET-4481' } as never) // the kit fills the rest
+  expect((await $.command.run({ command: 'note', args: 'ET-4481', ...TYPED })).text).toContain('→ agent du lot')
+  expect(sent.at(-1)?.to).toBe('ag-1')
 })
 
 test('from the Lead, a lot with an agent gets its commands and its MR events, and shows in Lots en cours', async ($, on) => {
