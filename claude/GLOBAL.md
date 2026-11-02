@@ -32,3 +32,4 @@ Perso : même boucle ; le contrat = l'idée qui se précise ; le grill est itér
 - Skills **`grill`** (challenge), **`verify`** (gate de fidélité), **`hunk-review`** (review annotée dans le diff) et **`distill`** (extraction de patterns vers reference-patterns).
 - **reference-patterns** (`~/Workspace/learning/reference-patterns`) : ma référence de patterns distillés — consultée au Build, alimentée par `distill`.
 - Chaque repo a un **`AGENTS.md`** : Stack · Comment tester · Comment livrer · Flow par type.
+- **Gel des mods jusqu'au 16/11/2026** (décidé le 02/11) : aucune nouvelle mécanique dans `dolmen-ops` ni `seammo-ops`, seulement des correctifs de ce qui casse. Une idée nouvelle se note (seafightcopy `memory/mods-freeze.md`), sans la construire.
