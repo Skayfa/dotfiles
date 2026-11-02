@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { branchFor, lotObjection, mrValue, parseDew, parseDigest, refusal, slo, sortBugs, ticketIds, wakingEvents, workingDays, type Bug } from '../hooks/rules.ts'
+import { STALL_MS, stalled, branchFor, lotObjection, mrValue, parseDew, parseDigest, refusal, slo, sortBugs, ticketIds, wakingEvents, workingDays, type Bug } from '../hooks/rules.ts'
 
 const DEW = [
   'ET-4236  Critical  -                 Bug       Medium     [Bug] Génération autorisation de conduite  https://app.notion.com/p/a',
@@ -57,3 +57,15 @@ test('the gestures reserved to the author and the git moves that lose work are r
   expect(refusal('glab mr create --draft --title "[ET-1] x" --description "## Link to Notion ticket\n[ET-1](u)"')).toBeUndefined()
   expect(refusal('git add go/a.go && git commit -m x && git push -u origin ET-1-x')).toBeUndefined()
 })
+
+test('a lot agent is stalled once stopped 15 min with nothing moving in its worktree', () => {
+  const t = 1_000_000_000
+  const w = { status: 'idle', stoppedAt: t - STALL_MS, activityAt: 0, busy: false }
+  expect(stalled(w, t)).toBe(true)
+  expect(stalled({ ...w, stoppedAt: t - STALL_MS + 60_000 }, t)).toBe(false) // stopped 14 min ago
+  expect(stalled({ ...w, activityAt: t - 60_000 }, t)).toBe(false) // a file written a minute ago
+  expect(stalled({ ...w, busy: true }, t)).toBe(false) // a process runs in its worktree
+  expect(stalled({ ...w, status: 'running' }, t)).toBe(false)
+  expect(stalled({ ...w, status: 'waiting' }, t)).toBe(true) // waiting on a task that died (ET-4436)
+})
+

@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
-import { HOME, ROOT, START, TYPED, page, ran, world } from './world.ts'
+import type { On } from 'claude-code'
+import { HOME, NOW, ROOT, START, TYPED, page, ran, world } from './world.ts'
 
 const TICKETS = '/v1/data_sources/1280ffb8-c088-8185-8688-000b4b3beb07/query'
 const MR = { iid: 2962, title: '[ET-4449][ET-4481] Compétences', draft: true, source_branch: 'ET-4449-ET-4481-competences', author: { username: 'younes.b' }, web_url: 'u', updated_at: '2026-10-30T09:00:00Z' }
@@ -199,3 +200,59 @@ test('outside Dolmen, another mod’s /panneau goes past this mod', async ($, on
   await $.session.start({ ...START, cwd: '/w/seafightcopy' })
   expect((await $.command.run({ command: 'panneau', args: '', ...TYPED })).text).toBe('beneath: panneau')
 })
+
+// --- a lot agent that stopped while nothing moves (ET-4436, 2026-11-02) -------------------------------
+
+// The Lead with lot ET-4449+ET-4481 and its agent ag-1, whose worktree last committed an hour ago.
+function stalledWorld(on: On, o: { status?: 'idle' | 'running' | 'waiting'; busy?: boolean } = {}) {
+  const base = withBranch(dolmen({}))
+  return world(on, {
+    agents: [{ id: 'ag-1', status: o.status ?? 'waiting' }],
+    store: { lotAgents: { 'ET-4449-ET-4481-competences': 'ag-1' } },
+    dirs: { [HOME]: ['ET-4449-ET-4481-competences'] },
+    answer: (argv, body) =>
+      argv[0] === 'lsof' ? { stdout: o.busy ? `p4242\nn${LOT}\np1\nn/` : 'p1\nn/' }
+      : argv.includes('--porcelain') ? { stdout: '' }
+      : argv.includes('--format=%ct') ? { stdout: String(Math.floor((NOW - 3_600_000) / 1000)) }
+      : base(argv, body),
+  })
+}
+const told = (prompts: string[]) => prompts.filter(p => p.includes('dolmen-ops : un agent de lot est arrêté'))
+
+test('a lot agent stopped 15 min with nothing moving in its worktree is told to the Lead once, and its row says it', async ($, on) => {
+  const { prompts, clock, notes } = stalledWorld(on)
+  await $.session.start(START)
+  await clock.advance(14 * 60_000)
+  await clock.settle()
+  expect(told(prompts)).toHaveLength(0)
+  await clock.advance(4 * 60_000 + 10) // the hand-off goes out a moment after the tick
+  await clock.settle()
+  expect(told(prompts)).toHaveLength(1)
+  expect(told(prompts)[0]).toContain('ET-4449-ET-4481-competences')
+  expect(told(prompts)[0]).toContain('SendMessage')
+  expect(notes.some(n => n.includes('agent arrêté'))).toBe(true)
+  await clock.advance(30 * 60_000)
+  await clock.settle()
+  expect(told(prompts)).toHaveLength(1)
+  await $.command.run({ command: 'etat', args: '', ...TYPED })
+  await clock.advance(10)
+  await clock.settle()
+  expect((await $.command.run({ command: 'etat', args: '', ...TYPED })).text).toContain('arrêté, rien ne bouge depuis')
+})
+
+test('an agent whose worktree has a process running, or that works, is not told', async ($, on) => {
+  const busy = stalledWorld(on, { busy: true })
+  await $.session.start(START)
+  await busy.clock.advance(40 * 60_000 + 10)
+  await busy.clock.settle()
+  expect(told(busy.prompts)).toHaveLength(0)
+})
+
+test('an agent at work is never told', async ($, on) => {
+  const working = stalledWorld(on, { status: 'running' })
+  await $.session.start(START)
+  await working.clock.advance(40 * 60_000 + 10)
+  await working.clock.settle()
+  expect(told(working.prompts)).toHaveLength(0)
+})
+

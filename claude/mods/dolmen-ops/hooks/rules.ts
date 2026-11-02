@@ -298,3 +298,14 @@ export const MODELS_SECTION =
   'dolmen-ops: subagents run on the lightest model that does the job: Haiku (agent dolmen-ops:runner) to run tests, the recette and read logs; ' +
   'Sonnet for routine code and babysit fixes; this model for /plan, /epic and Hard code. Read a ticket with the tool ticket_card, never the raw Notion page. ' +
   'Read the recette verdict as text; open a capture only for a ❌ criterion.'
+
+// A lot's agent that stopped while nothing moves in its worktree: no file changed, no commit, no process
+// running there. Seen on 2026-11-02 (ET-4436): `task run` died, its agent slept waiting for it, and
+// nobody knew until Younes asked. `running` and `pending` are at work; any other status has stopped.
+export const STALL_MS = 15 * 60_000
+export type LotWatch = { status: string; stoppedAt: number; activityAt: number; busy: boolean }
+export function stalled(w: LotWatch, now: number): boolean {
+  if (w.busy || w.status === 'running' || w.status === 'pending') return false
+  return now - Math.max(w.stoppedAt, w.activityAt) >= STALL_MS
+}
+

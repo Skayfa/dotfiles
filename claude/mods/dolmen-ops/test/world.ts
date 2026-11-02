@@ -15,7 +15,7 @@ export type World = {
   cwd?: string
   env?: Record<string, string>
   store?: Record<string, unknown>
-  agents?: { id: string; status: 'idle' | 'running' }[]
+  agents?: { id: string; status: 'idle' | 'running' | 'waiting' | 'completed' | 'pending' }[]
   dirs?: Record<string, string[]>
   files?: Record<string, string>
   answer?: (argv: string[], body: unknown) => Answer

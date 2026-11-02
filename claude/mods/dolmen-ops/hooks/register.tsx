@@ -38,8 +38,10 @@ import {
   mrValue,
   refusal,
   shouldTrim,
+  STALL_MS,
   slo,
   sortBugs,
+  stalled,
   ticketIds,
   wakingEvents,
   wrapForTrim,
@@ -190,6 +192,7 @@ async function tick($: EngineInterface): Promise<void> {
   lastTick = await now($)
   await watchMRs($).catch(() => {})
   await publishMine($).catch(() => {})
+  await watchStalled($).catch(() => {})
   if (panelOn) await refreshPanel($).catch(() => {})
 }
 
@@ -388,6 +391,77 @@ async function lotAgents($: EngineInterface): Promise<Record<string, string>> {
 
 const AGENT_STATE: Record<string, string> = { pending: 'démarre', running: 'travaille', waiting: 'attend', idle: 'attend ta réponse', completed: 'a fini son tour', failed: 'en échec', killed: 'arrêté' }
 
+// --- a lot whose agent stopped while nothing moves (ET-4436, 2026-11-02) ---------------------------
+// The Lead is told once per stop: in the conversation, by a notification, and on the lot's row.
+
+// When each lot agent was first seen stopped. A reload starts the count again: a later word, never a false one.
+const stoppedAt = new Map<string, number>()
+// The lots stalled at the last pass, with since when: the pane's rows say it.
+let stalledLots = new Map<string, number>()
+
+// The working folders of the processes running on this machine (lsof). Unknown: none.
+async function busyDirs($: EngineInterface): Promise<string[]> {
+  const r = await sh($, ['lsof', '-a', '-d', 'cwd', '-Fn'])
+  return r.ok ? r.out.split('\n').filter(l => l.startsWith('n')).map(l => l.slice(1)) : []
+}
+
+// The last sign of life in a lot's worktree: its last commit, or a changed file's last write.
+async function activityAt($: EngineInterface, dir: string): Promise<number> {
+  let at = (await lastCommitAt($, dir)) ?? 0
+  const changed = (await sh($, ['git', '-C', dir, 'status', '--porcelain'])).out.split('\n').filter(Boolean).slice(0, 200)
+  for (const line of changed) {
+    const path = line.slice(3).split(' -> ').pop()!.replace(/^"|"$/g, '')
+    const st = await $.fs.stat(`${dir}/${path}`).catch(() => undefined)
+    if (st && st.mtimeMs > at) at = st.mtimeMs
+  }
+  return at
+}
+
+const STALLED = (lots: readonly { name: string; state: string; minutes: number }[]) =>
+  [
+    `dolmen-ops : ${lots.length > 1 ? 'des agents de lot sont arrêtés' : 'un agent de lot est arrêté'} sans que rien ne bouge dans leur worktree (ni fichier, ni commit, ni process) :`,
+    ...lots.map(l => `- ${l.name} : agent « ${l.state} » depuis ${l.minutes} min`),
+    "S'il a posé une question à Younes, transmets-la-lui. Sinon il est bloqué : lis sa dernière sortie et ce qui devait tourner (task run, docker…), trouve pourquoi c'est arrêté, corrige, puis relance l'agent avec SendMessage. Dis à Younes en une ligne ce que tu as trouvé.",
+  ].join('\n')
+
+async function watchStalled($: EngineInterface): Promise<void> {
+  if (!root || lotBranch) return
+  const t = await now($)
+  const agents = await lotAgents($)
+  const list = await $.agent.list().catch(() => [])
+  const told = ((await $.store.get('stalledTold')) as string[] | undefined) ?? []
+  const keys: string[] = []
+  const fresh: { name: string; state: string; minutes: number }[] = []
+  const found = new Map<string, number>()
+  let busy: string[] | undefined
+  for (const lot of await lotDirs($, root)) {
+    const a = list.find(x => x.id === agents[lot.name])
+    if (!a) continue
+    if (a.status === 'running' || a.status === 'pending') {
+      stoppedAt.delete(a.id)
+      continue
+    }
+    if (!stoppedAt.has(a.id)) stoppedAt.set(a.id, t)
+    const since = stoppedAt.get(a.id)!
+    if (t - since < STALL_MS) continue
+    busy ??= await busyDirs($)
+    const w = { status: a.status, stoppedAt: since, activityAt: await activityAt($, lot.dir), busy: busy.some(d => d === lot.dir || d.startsWith(`${lot.dir}/`)) }
+    if (!stalled(w, t)) continue
+    const from = Math.max(w.stoppedAt, w.activityAt)
+    found.set(lot.name, from)
+    const key = `${a.id}@${since}`
+    keys.push(key)
+    if (!told.includes(key)) fresh.push({ name: lot.name, state: AGENT_STATE[a.status] ?? a.status, minutes: Math.round((t - from) / 60_000) })
+  }
+  stalledLots = found
+  if (fresh.length) {
+    handOff($, STALLED(fresh))
+    void $.ui.notify(`${fresh.map(l => l.name).join(', ')} : agent arrêté, rien ne bouge depuis ${fresh[0]!.minutes} min`, { title: TITLE })
+  }
+  // Only the stops still going on are kept: an agent that works again and stops later is told again.
+  if (fresh.length || keys.length !== told.length) await $.store.set('stalledTold', keys)
+}
+
 // Each lot with its agent, its branch, its MR and how long since it moved (its MR, else its last
 // commit): past a day, orange with Reprendre. Then what /menage go would remove.
 async function lotRows($: EngineInterface, t: number): Promise<PanelRow[]> {
@@ -409,8 +483,10 @@ async function lotRows($: EngineInterface, t: number): Promise<PanelRow[]> {
       age !== undefined ? `bougé il y a ${ago(age)}` : '',
     ].filter(Boolean)
     const stale = age !== undefined && age >= STALE_MS && !(mr?.d && wakingEvents(mr.d).length)
-    const tone = mr?.d ? mrValue(mr.d).tone : agent?.status === 'idle' || stale ? 'warning' : undefined
-    rows.push({ label: lot.name, href: mr?.mr.url, value: parts.join(' · '), tone: stale && tone === 'success' ? 'warning' : tone, ...(stale && own ? { action: { id: `resume:${lot.name}`, label: 'Reprendre' } } : {}) })
+    const halt = stalledLots.get(lot.name)
+    if (halt !== undefined) parts.splice(1, 0, `arrêté, rien ne bouge depuis ${ago(t - halt)}`)
+    const tone = halt !== undefined ? 'error' : mr?.d ? mrValue(mr.d).tone : agent?.status === 'idle' || stale ? 'warning' : undefined
+    rows.push({ label: lot.name, href: mr?.mr.url, value: parts.join(' · '), tone: stale && tone === 'success' ? 'warning' : tone, ...((stale || halt !== undefined) && own ? { action: { id: `resume:${lot.name}`, label: 'Reprendre' } } : {}) })
   }
   if (menage?.done.length && !lotBranch) {
     const n = menage.done.length
