@@ -1,6 +1,6 @@
 // Pure rules of the tracking file: reading it, the gates, the moves, the pane's rows.
 // No `$` here: every function takes the file and returns a new one or a refusal.
-import type { Jalon, Note, Pilotage, Question, Statut, Tache } from '../types'
+import type { Entree, Jalon, Note, Pilotage, Question, Statut, Tache } from '../types'
 
 export const FILE = 'pilotage/pilotage.json'
 export const WIP_MAX = 2
@@ -35,6 +35,8 @@ export function parse(text: string): { data: Pilotage | null; errors: string[] }
       maj: String(p.maj ?? ''),
       ...(typeof p.wip_max === 'number' ? { wip_max: p.wip_max } : {}),
       ...(Array.isArray(p.zones_liees) ? { zones_liees: arr(p.zones_liees).map(strs) } : {}),
+      ...(typeof p.verification === 'string' && p.verification.trim() ? { verification: p.verification } : {}),
+      ...(typeof p.relecteur === 'string' && p.relecteur.trim() ? { relecteur: p.relecteur } : {}),
     },
     jalons: arr(r.jalons) as Jalon[],
     scopes: arr(r.scopes) as Pilotage['scopes'],
@@ -43,7 +45,7 @@ export function parse(text: string): { data: Pilotage | null; errors: string[] }
       return { ...x, criteres: strs(x.criteres), depend_de: strs(x.depend_de), bloque_par: strs(x.bloque_par), chemins: strs(x.chemins) }
     }),
     questions: arr(r.questions).map(q => ({ ...(q as Question), bloque: strs((q as Question).bloque), options: strs((q as Question).options) })),
-    journal: arr(r.journal) as Pilotage['journal'],
+    journal: arr(r.journal) as Entree[],
   }
   return { data, errors: check(data) }
 }
@@ -68,7 +70,59 @@ export function check(p: Pilotage): string[] {
     for (const q of t.bloque_par) if (!questions.has(q)) errors.push(`${t.id} bloqué par ${q}, qui n’existe pas`)
   }
   for (const q of p.questions) for (const t of q.bloque) if (!taches.has(t)) errors.push(`${q.id} bloque ${t}, qui n’existe pas`)
-  return [...errors, ...cutErrors(p)]
+  return [...drift(p), ...errors, ...cutErrors(p)]
+}
+
+// --- what the journal explains -----------------------------------------------------------------
+
+const WORK: Statut[] = ['en_cours', 'fait', 'abandonne']
+const isWork = (s: Statut | undefined) => !!s && WORK.includes(s)
+// Entries written before the mod recorded `tache` and `statut` are read by their words.
+const LEGACY: Record<string, Statut> = { démarrée: 'en_cours', reprise: 'en_cours', terminée: 'fait', suspendue: 'backlog', abandonnée: 'abandonne' }
+
+// The status moves the journal records, in order.
+export function journalMoves(p: Pilotage): { tache: string; statut: Statut }[] {
+  return p.journal.flatMap(j => {
+    if (typeof j.tache === 'string' && j.statut) return [{ tache: j.tache, statut: j.statut }]
+    const m = /^(\S+) (démarrée|reprise|terminée|suspendue|abandonnée)\b/.exec(String(j.texte ?? ''))
+    const [, tache = '', verb = ''] = m ?? []
+    return m ? [{ tache, statut: LEGACY[verb] as Statut }] : []
+  })
+}
+
+// A work status (in progress, done, dropped) the journal does not explain: someone changed it
+// outside the mod (a shell write). Derived statuses (backlog, ready, blocked) are the rules' own.
+export function drift(p: Pilotage): string[] {
+  const last = new Map(journalMoves(p).map(m => [m.tache, m.statut]))
+  const errors: string[] = []
+  for (const t of p.taches) {
+    const said = last.get(t.id)
+    if (isWork(t.statut) && said !== t.statut)
+      errors.push(`${t.id} is ${t.statut} but ${said ? `the journal's last move left it ${said}` : 'no move in the journal put it there'}: changed outside the mod?`)
+    else if (!isWork(t.statut) && isWork(said))
+      errors.push(`${t.id} is ${t.statut} but the journal's last move left it ${said}: changed outside the mod?`)
+  }
+  return errors
+}
+
+// What an edit may not change: the terms of a task in progress, the gate and the reviewer once set,
+// and the status moves the journal records.
+const FROZEN = ['criteres', 'risque_donnees', 'invariant', 'depend_de', 'bloque_par'] as const
+const term = (t: Tache, f: (typeof FROZEN)[number]) =>
+  f === 'risque_donnees' ? String(!!t[f]) : f === 'invariant' ? String(t[f] ?? '') : JSON.stringify(t[f] ?? [])
+
+export function frozenEdits(before: Pilotage, after: Pilotage): string[] {
+  const out: string[] = []
+  const now = new Map(after.taches.map(t => [t.id, t]))
+  for (const t of before.taches.filter(x => x.statut === 'en_cours')) {
+    const u = now.get(t.id)
+    if (!u) out.push(`${t.id} (in progress) removed`)
+    else for (const f of FROZEN) if (term(t, f) !== term(u, f)) out.push(`${t.id}.${f} (in progress)`)
+  }
+  for (const k of ['verification', 'relecteur'] as const)
+    if (before.projet[k] && after.projet[k] !== before.projet[k]) out.push(`projet.${k}`)
+  if (JSON.stringify(journalMoves(before)) !== JSON.stringify(journalMoves(after))) out.push('the status moves of journal')
+  return out
 }
 
 // --- how the work is cut -----------------------------------------------------------------------
@@ -201,7 +255,7 @@ export function normalize(p: Pilotage, now: number): Pilotage {
   return { ...next, jalons: p.jalons.map(j => ({ ...j, statut: jalonStatut(next, j) })), projet: { ...p.projet, maj: day(now) } }
 }
 
-const log = (p: Pilotage, now: number, texte: string): Pilotage => ({ ...p, journal: [...p.journal, { date: day(now), texte }] })
+const log = (p: Pilotage, now: number, texte: string, move?: { tache: string; statut: Statut }): Pilotage => ({ ...p, journal: [...p.journal, { date: day(now), texte, ...move }] })
 const put = (p: Pilotage, t: Tache): Pilotage => ({ ...p, taches: p.taches.map(x => (x.id === t.id ? t : x)) })
 const ready = (p: Pilotage) => new Set(p.taches.filter(t => statut(p, t) === 'pret').map(t => t.id))
 
@@ -221,7 +275,7 @@ export function start(p: Pilotage, id: string, now: number, holder = '', takeOve
   if (s === 'en_cours') {
     if (t.tenue_par === holder) return { refus: `${id} est déjà en cours dans cette session.` }
     if (!takeOver) return { refus: `${id} est tenue par une autre session : ne la touche pas, ou reprends-la explicitement (reprendre: true) si cette session est arrêtée.` }
-    const file = normalize(log(put(p, { ...t, tenue_par: holder, depuis: day(now) }), now, `${id} reprise par une autre session`), now)
+    const file = normalize(log(put(p, { ...t, tenue_par: holder, depuis: day(now) }), now, `${id} reprise par une autre session`, { tache: id, statut: 'en_cours' }), now)
     return { file, said: `${id} reprise. ${card(t)}` }
   }
   if (s !== 'pret') return { refus: `${id} n’est pas prête (${s}) : elle attend ${waits(p, t).join(', ') || 'rien de connu'}.` }
@@ -231,7 +285,7 @@ export function start(p: Pilotage, id: string, now: number, holder = '', takeOve
   if (mine.length >= max) return { refus: `Cette session tient déjà ${mine.length} tâche(s) (${mine.map(x => x.id).join(', ')}), le maximum est ${max} : termine ou suspends-en une d’abord.` }
   const crossed = wip.map(x => ({ x, shared: sharedPaths(p, t, x) })).find(c => c.shared.length)
   if (crossed) return { refus: `${id} écrirait ${crossed.shared[0]}, que ${crossed.x.id} (en cours) écrit aussi : attends sa fin ou ordonne les deux tâches.` }
-  const file = normalize(log(put(p, { ...t, statut: 'en_cours', debut: day(now), depuis: day(now), tenue_par: holder }), now, `${id} démarrée`), now)
+  const file = normalize(log(put(p, { ...t, statut: 'en_cours', debut: day(now), depuis: day(now), tenue_par: holder }), now, `${id} démarrée`, { tache: id, statut: 'en_cours' }), now)
   const care = t.risque_donnees ? ` Elle touche aux données : présente le plan et l’invariant (${t.invariant || 'à écrire'}), puis attends la validation avant de coder.` : ''
   return { file, said: `${id} en cours. ${card(t)}${care}` }
 }
@@ -250,7 +304,8 @@ export function note(p: Pilotage, id: string, n: Omit<Note, 'date'>, now: number
 // A task that touches user data also needs the local review's verdict: OK, after the fixes it asked for.
 export type Review = { verdict: string; texte: string }
 
-export function finish(p: Pilotage, id: string, preuve: string, covered: number[], now: number, review: Review = { verdict: '', texte: '' }, holder = ''): Move {
+// The refusals that need nothing run: checked before the gate and the review, which take minutes.
+export function finishable(p: Pilotage, id: string, preuve: string, covered: number[], holder = ''): { task: Tache } | { refus: string } {
   const t = task(p, id)
   if (!t) return { refus: `Tâche inconnue : ${id}.` }
   if (t.statut !== 'en_cours') return { refus: `${id} n’est pas en cours (${statut(p, t)}) : démarre-la d’abord.` }
@@ -258,10 +313,17 @@ export function finish(p: Pilotage, id: string, preuve: string, covered: number[
   if (!preuve.trim()) return { refus: 'Pas de preuve, pas de fin : donne les commandes lancées et leur résultat.' }
   const missing = t.criteres.map((_, i) => i + 1).filter(n => !covered.includes(n))
   if (missing.length) return { refus: `Critères non couverts : ${missing.map(n => `${n}. ${t.criteres[n - 1]}`).join(' ; ')}.` }
+  return { task: t }
+}
+
+export function finish(p: Pilotage, id: string, preuve: string, covered: number[], now: number, review: Review = { verdict: '', texte: '' }, holder = ''): Move {
+  const can = finishable(p, id, preuve, covered, holder)
+  if ('refus' in can) return can
+  const t = can.task
   if (t.risque_donnees && review.verdict !== 'OK')
     return { refus: review.verdict ? `Relecture ${review.verdict} : corrige ce qu’elle signale et relance-la jusqu’à OK.` : `${id} touche aux données : lance la relecture locale (sous-agent de relecture du projet) et donne son verdict.` }
   const relecture = review.verdict ? { relecture: `${review.verdict} · ${review.texte}`.trim() } : {}
-  const after = normalize(log(put(p, { ...t, statut: 'fait', fini_le: day(now), depuis: day(now), preuve, ...relecture, tenue_par: undefined }), now, `${id} terminée`), now)
+  const after = normalize(log(put(p, { ...t, statut: 'fait', fini_le: day(now), depuis: day(now), preuve, ...relecture, tenue_par: undefined }), now, `${id} terminée`, { tache: id, statut: 'fait' }), now)
   return { file: after, said: `${id} terminée.${unlocked(p, after)}` }
 }
 
@@ -271,7 +333,7 @@ export function suspend(p: Pilotage, id: string, raison: string, now: number, ho
   if (t.statut !== 'en_cours') return { refus: `${id} n’est pas en cours.` }
   if (t.tenue_par && holder && t.tenue_par !== holder) return { refus: `${id} est tenue par une autre session.` }
   if (!raison.trim()) return { refus: 'Dis pourquoi elle est suspendue.' }
-  const file = normalize(log(put(p, { ...t, statut: 'backlog', tenue_par: undefined, notes: [t.notes, `Suspendue le ${day(now)} : ${raison}`].filter(Boolean).join('\n') }), now, `${id} suspendue : ${raison}`), now)
+  const file = normalize(log(put(p, { ...t, statut: 'backlog', tenue_par: undefined, notes: [t.notes, `Suspendue le ${day(now)} : ${raison}`].filter(Boolean).join('\n') }), now, `${id} suspendue : ${raison}`, { tache: id, statut: 'backlog' }), now)
   return { file, said: `${id} suspendue.` }
 }
 
@@ -282,7 +344,7 @@ export function drop(p: Pilotage, id: string, raison: string, now: number, holde
   if (DONE.includes(t.statut)) return { refus: `${id} est déjà ${t.statut}.` }
   if (t.statut === 'en_cours' && t.tenue_par && holder && t.tenue_par !== holder) return { refus: `${id} est tenue par une autre session.` }
   if (!raison.trim()) return { refus: 'Dis pourquoi elle est abandonnée (la décision qui la rend inutile).' }
-  const after = normalize(log(put(p, { ...t, statut: 'abandonne', tenue_par: undefined, depuis: day(now), notes: [t.notes, `Abandonnée le ${day(now)} : ${raison}`].filter(Boolean).join('\n') }), now, `${id} abandonnée : ${raison}`), now)
+  const after = normalize(log(put(p, { ...t, statut: 'abandonne', tenue_par: undefined, depuis: day(now), notes: [t.notes, `Abandonnée le ${day(now)} : ${raison}`].filter(Boolean).join('\n') }), now, `${id} abandonnée : ${raison}`, { tache: id, statut: 'abandonne' }), now)
   return { file: after, said: `${id} abandonnée.${unlocked(p, after)}` }
 }
 
@@ -404,4 +466,71 @@ export function summary(p: Pilotage, now: number): string {
   block('PROCHAINES', nextRows(p))
   lines.push('', 'JALONS', ...jalonCounts(p).map(c => `- ${c.label} : ${c.done}/${c.total}${c.blocked ? ` · ${c.blocked} bloquées` : ''}`))
   return lines.join('\n')
+}
+
+// --- the gate and the review, run by tache_terminer -------------------------------------------
+
+export const GATE_TIMEOUT_MS = 600_000
+export const REVIEW_TIMEOUT_MS = 20 * 60_000
+
+// The gate command as an argument vector: its words, no shell.
+export const gateArgv = (cmd: string): string[] => cmd.trim().split(/\s+/).filter(Boolean)
+
+// The task's paths split by where they are: in the repo (relative to it) or outside (~/..., elsewhere).
+export function splitPaths(chemins: string[], root: string): { inside: string[]; outside: string[] } {
+  const inside: string[] = []
+  const outside: string[] = []
+  for (const c of chemins.map(x => x.trim()).filter(Boolean)) {
+    if (root && c.startsWith(`${root}/`)) inside.push(c.slice(root.length + 1))
+    else if (c.startsWith('~') || c.startsWith('/')) outside.push(c)
+    else inside.push(c.replace(/^\.\//, ''))
+  }
+  return { inside, outside }
+}
+
+export const tail = (text: string, lines = 20, chars = 2000): string => text.trimEnd().split('\n').slice(-lines).join('\n').slice(-chars)
+
+export type GateRun = { argv: string[]; exitCode: number; ms: number; stdout: string; stderr: string; at: number }
+
+export function gateLine(r: GateRun): string {
+  const at = new Date(r.at).toISOString().slice(0, 16)
+  return `gate (run by the mod): ${r.argv.join(' ')} · exit ${r.exitCode} · ${Math.round(r.ms / 1000)} s · ${at}Z`
+}
+
+// The gate's own record, appended to the model's proof: the command, its result, its duration, its tail.
+export function gateProof(preuve: string, r: GateRun): string {
+  const out = [tail(r.stdout), tail(r.stderr, 10, 1000)].filter(Boolean).join('\n')
+  return `${preuve.trim()}\n\n${gateLine(r)}${out ? `\n${out}` : ''}`
+}
+
+export type Verdict = 'OK' | 'A_CORRIGER' | 'BLOQUANT'
+const WORST: Verdict[] = ['OK', 'A_CORRIGER', 'BLOQUANT']
+
+// The reviewer's verdict: its last `verdict: X` line, made worse by any item it marked
+// A_CORRIGER or BLOQUANT. No verdict line, no verdict.
+export function parseVerdict(answer: string): Verdict | null {
+  const lines = [...answer.matchAll(/^[\s>*_`#-]*verdict[\s*_`]*:[\s*_`]*(OK|A_CORRIGER|BLOQUANT)\b/gim)]
+  const last = lines.at(-1)?.[1]?.toUpperCase() as Verdict | undefined
+  if (!last) return null
+  const items = [...answer.matchAll(/^\s*(?:[-*•]|\d+[.)])?\s*[*_`[]*(A_CORRIGER|BLOQUANT)\b/gm)].map(m => m[1] as Verdict)
+  return [last, ...items].reduce((a, b) => (WORST.indexOf(b) > WORST.indexOf(a) ? b : a))
+}
+
+// What the reviewer is asked: the task, its invariant, the diff since it started, and the last line it must write.
+export function reviewPrompt(t: Tache, diff: string, base: string, untracked: string[], outside: string[]): string {
+  return [
+    `Review task ${t.id} (${t.titre}) before it is marked done. It touches user data.`,
+    `Expected result: ${t.resultat}`,
+    `Invariant its property test must check: ${t.invariant || '(none written)'}`,
+    `Its paths: ${(t.chemins ?? []).join(', ') || '(none declared: the whole repo)'}.`,
+    `The diff below goes from ${base || 'the empty tree'} (the last commit before the task started) to the working tree, on those paths.`,
+    untracked.length ? `New files not in git yet, read them: ${untracked.join(', ')}.` : null,
+    outside.length ? `Paths outside this repository, read them yourself: ${outside.join(', ')}.` : null,
+    'Follow your own checklist. Change nothing.',
+    'End your answer with one last line, exactly one of: `verdict: OK`, `verdict: A_CORRIGER`, `verdict: BLOQUANT`.',
+    '',
+    '```diff',
+    diff || '(empty diff)',
+    '```',
+  ].filter(x => x !== null).join('\n')
 }

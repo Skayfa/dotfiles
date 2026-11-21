@@ -8,7 +8,14 @@ Il ne s'active que dans un dossier qui contient `pilotage/pilotage.json`. Ailleu
 
 `pilotage/pilotage.json`, versionné avec le code : `projet`, `jalons`, `scopes` (verdict, garder / couper / repousser), `taches` (résultat, critères, priorité, taille, risque données, dépendances, questions bloquantes, statut, notes de suivi, preuve), `questions` (options, enjeu, ce qu'elles bloquent, décision et mots du propriétaire), `journal`.
 
-Le backlog s'édite librement. **Les statuts, les décisions et les go ne s'éditent pas à la main** : une modification qui en change un est refusée, comme celle qui laisserait le JSON illisible.
+Dans `projet`, deux clés facultatives, propres au projet :
+- `verification` : la gate locale, par exemple `"make check"` (des mots séparés par des espaces, sans shell) ;
+- `relecteur` : le type de sous-agent qui relit une tâche qui touche aux données, par exemple celui que le projet déclare dans `.claude/agents/`.
+
+Le backlog s'édite librement. **Les statuts, les décisions et les go ne s'éditent pas à la main** : une modification qui en change un est refusée, comme celle qui laisserait le JSON illisible. Sont refusés aussi :
+- un changement des `criteres`, `risque_donnees`, `invariant`, `depend_de` ou `bloque_par` d'une tâche `en_cours` (ou sa suppression) : une tâche en cours garde ses termes jusqu'à sa fin, le message nomme le champ. Pour les changer : `tache_suspendre`, puis l'édition. `notes`, `suivi`, `titre`, `chemins` restent libres ;
+- un changement de `projet.verification` ou `projet.relecteur` une fois posés (les poser la première fois passe) ;
+- un changement des mouvements que le journal enregistre.
 
 ## Les portes (dans le code)
 
@@ -18,7 +25,7 @@ Une tâche est **prête** quand son jalon a son go, que ses dépendances sont fa
 |---|---|---|
 | `tache_demarrer` | passe en cours, rend la fiche ; rappelle plan + invariant si la tâche touche aux données | une tâche pas prête ; plus de `wip_max` tâches en cours (2 par défaut) |
 | `tache_note` | fait / reste / suivant, pour la reprise | une note incomplète |
-| `tache_terminer` | fait, avec la preuve locale (pas de CI) ; dit ce qui devient prêt | sans preuve ; un critère non couvert ; une tâche qui touche aux données sans relecture locale au verdict OK |
+| `tache_terminer` | lance **lui-même** la gate (`projet.verification`) dans le checkout principal, les `chemins` de la tâche dans `PILOTE_CHEMINS` (un par ligne) ; sa sortie (commande, code, durée, fin) s'ajoute à la preuve du modèle. Pour une tâche qui touche aux données, lance **lui-même** le relecteur (`projet.relecteur`) sur le diff de la tâche et lit son verdict. Puis fait ; dit ce qui devient prêt | sans preuve ; un critère non couvert ; la gate qui échoue, dépasse 10 min ou ne se lance pas (`make` absent) ; un relecteur qui ne démarre pas, ne répond pas en 20 min, ou dont la dernière ligne n'est pas `verdict: OK` (ou qui marque un point `A_CORRIGER` / `BLOQUANT`) |
 | `tache_suspendre` | remet au backlog avec la raison | |
 | `tache_abandonner` | abandonne une tâche qu’une décision rend inutile ; ce qui la suit est débloqué | sans raison ; une tâche tenue par une autre session |
 | `question_poser` | pose une décision au propriétaire, bloque les tâches concernées | |
@@ -33,13 +40,28 @@ Une tâche est **prête** quand son jalon a son go, que ses dépendances sont fa
 - **Chemins verrouillés.** Chaque tâche déclare les `chemins` qu'elle écrit. Une tâche ne démarre pas si une tâche en cours écrit un même chemin. `projet.zones_liees` lie des préfixes qui verrouillent ensemble (le code généré et sa source).
 - **Écritures concurrentes.** Chaque mouvement relit le fichier juste avant d'écrire et se rejoue sur ce qu'une autre session a écrit entre-temps. La fenêtre restante est celle entre la dernière lecture et l'écriture.
 
+## La preuve et la relecture, vérifiées
+
+`tache_terminer` vérifie d'abord ce qui ne coûte rien (tâche en cours, tenant, preuve, critères), puis lance la gate, puis le relecteur, puis écrit la fin sur une relecture fraîche du fichier.
+
+- **Sans `projet.verification`**, la preuve reste déclarée (comportement d'avant) et le résultat le dit. **Sans `projet.relecteur`**, le verdict de relecture reste déclaré (`relecture_verdict`) et le résultat le dit.
+- **Le relecteur est un sous-agent lancé par le mod** (`$.agent.spawn`, avec le type `projet.relecteur`). Son prompt porte la tâche, l'invariant et le diff de ses chemins depuis le dernier commit avant son début (les fichiers nouveaux sont nommés). Sa réponse arrive par son `turn.complete` ; le mod en lit la dernière ligne `verdict: …`, aggravée par tout point marqué `A_CORRIGER` ou `BLOQUANT`. Le champ déclaré est ignoré.
+- **Alternative écartée : un rapport daté** (`pilotage/relectures/<ID>-<date>.md`, première ligne `verdict: …`, plus récent que le début de la tâche et que le dernier commit de ses chemins). Le mod ne peut pas savoir qui a écrit ce fichier : le modèle peut l'écrire lui-même, c'est le champ déclaré déplacé dans un fichier. `$.agent.spawn` est l'API documentée du moteur pour exactement ce cas (un outil du mod qui lance un sous-agent et attend sa réponse, sans budget de temps), et le verdict vient alors de la réponse même du sous-agent.
+
+## Les statuts changés hors du mod, signalés
+
+Chaque mouvement que fait le mod (démarrer, reprendre, terminer, suspendre, abandonner) écrit dans `journal` une entrée avec `tache` et `statut`. À chaque lecture, le mod compare : une tâche `en_cours`, `fait` ou `abandonne` que le dernier mouvement du journal n'explique pas, ou une tâche que le journal a laissée dans un de ces statuts et qui n'y est plus, est signalée (« changed outside the mod? ») en tête de la dernière ligne du panneau et dans `pilotage_etat`. Les entrées écrites avant ce mécanisme sont lues par leurs mots (« X démarrée », « X terminée »…). Les statuts dérivés (`backlog`, `pret`, `bloque`) sont recalculés par les règles et ne comptent pas. Le signalement reste tant que le propriétaire n'a pas remis le statut ou le journal d'accord, à la main.
+
 ## Le découpage, vérifié
 
 La dernière ligne du panneau liste ce qui cloche dans le backlog : un cycle de dépendances, deux tâches sans ordre entre elles qui écrivent un même chemin, une tâche de taille L, sans critère, ou qui touche aux données sans `invariant`.
 
 ## Limites connues
 
-- Le garde ne voit que les outils Edit et Write : une écriture par le shell (`sed`, `cat >`) passe à côté. Les mouvements de statut doivent passer par les outils.
+- Le garde ne voit que les outils Edit et Write : une écriture par le shell (`sed`, `cat >`) n'est pas empêchée. Un statut ainsi changé est **détecté après coup** (signalé à la lecture), pas évité ; un changement par le shell des termes d'une tâche en cours, de `projet.verification` ou de `projet.relecteur` n'est ni empêché ni signalé.
+- La gate tourne dans le checkout principal : le travail d'un worktree qui n'y est pas encore n'est pas ce qu'elle vérifie. Elle est bornée à 10 min (la limite de `$.process.run`).
+- L'attente du relecteur vit dans le module : un rechargement du mod pendant une relecture la perd, et `tache_terminer` refuse au bout de 20 min.
+- Une session qui tourne encore la 0.1.0 réécrit `projet` sans `verification` ni `relecteur` : poser ces clés seulement quand toutes les sessions ont rechargé la 0.2.0.
 - Les chemins verrouillent le démarrage, pas encore chaque écriture : une session peut écrire hors des chemins de sa tâche.
 
 ## Commandes et panneau
@@ -84,4 +106,4 @@ claude plugin test ~/dotfiles/claude/mods/pilote
 
 Pour essayer une modification sans l'installer : `claude --plugin-dir ~/dotfiles/claude/mods/pilote`, après `claude plugin disable pilote@skayfa` pour ne pas le charger deux fois.
 
-`hooks/rules.ts` : les règles pures (lecture, portes, mouvements, lignes du panneau). `hooks/register.tsx` : les hooks, les outils, le panneau. `types/index.d.ts` : le fichier et l'état du panneau.
+`hooks/rules.ts` : les règles pures (lecture, portes, mouvements, journal, gate et verdict, lignes du panneau). `hooks/register.tsx` : les hooks, les outils (dont la gate et le relecteur de `tache_terminer`), le panneau. `types/index.d.ts` : le fichier et l'état du panneau.

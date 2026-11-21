@@ -1,7 +1,7 @@
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test, type TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Pilotage } from '../types'
-import { FILE, cutErrors, drop, finish, go, parse, serialize, start, statut, statusMoves } from '../hooks/rules.ts'
+import { FILE, REVIEW_TIMEOUT_MS, cutErrors, drift, drop, finish, frozenEdits, go, parse, parseVerdict, serialize, start, statut, statusMoves } from '../hooks/rules.ts'
 
 const NOW = Date.parse('2026-11-21T10:00:00Z')
 
@@ -127,7 +127,8 @@ const PANE = {
   props: { title: 'Pilotage', isFocused: false, bodyColumns: 70, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
 } as const
 
-type Opts = { onRead?: (n: number) => void }
+type Run = { argv: readonly string[]; init?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } }
+type Opts = { onRead?: (n: number) => void; run?: (r: Run) => unknown }
 
 function world(on: On, files: Record<string, string>, prompts: string[] = [], opts: Opts = {}) {
   let reads = 0
@@ -147,7 +148,8 @@ function world(on: On, files: Record<string, string>, prompts: string[] = [], op
   on('prompt.submit', (_, e) => (prompts.push(e.text), { text: e.text }) as never)
   on('tool.call', () => ({ result: 'edited' }) as never)
   on('session.id', () => ({ value: 'sess-1' }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '/p/.git\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }) as never)
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('process.run', (_, e) => (opts.run?.(e) ?? { value: { exitCode: 0, stdout: '/p/.git\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }) as never)
   return { files, prompts }
 }
 
@@ -250,4 +252,176 @@ test('a worktree copy of the file is refused, the main one is the truth', async 
   expect(copy.deny).toContain('copie')
   const state = await $.tool.call({ tool: 'mcp__pilote__pilotage_etat' })
   expect(String(state.result)).toContain('demo')
+})
+
+// --- INF-11: the mod verifies instead of recording -------------------------------------------
+
+// CON-01 in progress in this session ('sess-1'), with the project's gate and reviewer as given.
+const inProgress = (projet: Partial<Pilotage['projet']> = {}): Pilotage => {
+  const p = ok(start(ok(go(base(), 'M1', NOW)).file, 'CON-01', NOW, 'sess-1')).file
+  return { ...p, projet: { ...p.projet, ...projet } }
+}
+const out = (exitCode: number, stdout: string, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } })
+const FINISH = { tool: 'mcp__pilote__tache_terminer', id: 'CON-01', preuve: 'tests verts', criteres_couverts: [1, 2], relecture_verdict: 'OK', relecture: 'déclaré' } as const
+
+test('tache_terminer runs the gate itself, in the main checkout with the task paths, and records its output', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  const { files } = world(on, { [FILE]: serialize(inProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(0, 'zone domaine: check.d/domaine.sh\nmake check: ok, 42 s total.\n')) : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call(FINISH)
+  expect(String(done.result)).toContain('gate (run by the mod): make check · exit 0')
+  expect(runs[0].argv).toEqual(['make', 'check'])
+  expect(runs[0].init?.cwd).toBe('/p')
+  expect(runs[0].init?.env?.PILOTE_CHEMINS).toBe('contracts/schemas/v1/boite.schema.json')
+  const t = JSON.parse(files[FILE]).taches[0]
+  expect(t.statut).toBe('fait')
+  expect(t.preuve).toContain('tests verts')
+  expect(t.preuve).toContain('make check: ok, 42 s total.')
+})
+
+test('a failing gate refuses to finish and leaves the task in progress', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { files } = world(on, { [FILE]: serialize(inProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? out(1, 'make check: FAILED, 3 s total.\n', 'domaine: 2 tests failed') : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call(FINISH)
+  expect(done.deny).toContain('the gate failed')
+  expect(done.deny).toContain('exit 1')
+  expect(done.deny).toContain('2 tests failed')
+  expect(JSON.parse(files[FILE]).taches[0].statut).toBe('en_cours')
+})
+
+test('a gate that times out or cannot start is a refusal, never a pass', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  let why = 'timed out after 600000 ms'
+  const { files } = world(on, { [FILE]: serialize(inProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? { deny: why } : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  expect((await $.tool.call(FINISH)).deny).toContain('did not finish within 10 min')
+  why = 'spawn make ENOENT'
+  expect((await $.tool.call(FINISH)).deny).toContain('could not run')
+  expect(JSON.parse(files[FILE]).taches[0].statut).toBe('en_cours')
+})
+
+test('without projet.verification the proof stays declared, and the result says so', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  world(on, { [FILE]: serialize(inProgress()) })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call(FINISH)
+  expect(String(done.result)).toContain('No projet.verification')
+  expect(String(done.result)).toContain('No projet.relecteur')
+})
+
+// The reviewer: spawned by the mod, its verdict read from its own answer. The kit keeps the agent id
+// to the engine (a hook that answers a spawn started none), so the agent is found by its description.
+function spawner(on: On, spawns: { prompt: string; subagentType?: string; subagent_type?: string; description?: string }[], deny: () => string | undefined) {
+  on('agent.spawn', (_, e) => (spawns.push(e), deny() ? { deny: deny() } : { model: 'm' }) as never)
+  on('agent.list', () => ({ value: spawns.map(s => ({ id: 'ag-1', description: s.description, type: 'reviewer-agent' })) }) as never)
+}
+
+function reviewWorld(on: On, answer: string | null) {
+  const spawns: { prompt: string; subagentType?: string; subagent_type?: string; description?: string }[] = []
+  spawner(on, spawns, () => undefined)
+  const w = world(on, { [FILE]: serialize(inProgress({ relecteur: 'reviewer-agent' })) }, [], {
+    run: r => (r.argv.includes('diff') ? out(0, '+ a line\n') : r.argv.includes('rev-list') ? out(0, 'abc123\n') : r.argv.includes('ls-files') ? out(0, '') : undefined),
+  })
+  return { ...w, spawns, answer }
+}
+
+async function finishWithReview($: Parameters<TestBody>[0], clock: { settle: () => Promise<void> }, answer: string | null, declared = 'OK') {
+  const call = $.tool.call({ ...FINISH, relecture_verdict: declared })
+  await clock.settle()
+  if (answer !== null) await $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 't-1', agentId: 'ag-1', reason: 'answer' })
+  return call
+}
+
+test('the review verdict comes from the reviewer the mod spawns, not from the declared field', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { files, spawns } = reviewWorld(on, null)
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const refused = await finishWithReview($, clock, '- BLOQUANT a value is overwritten (A.swift:12)\nverdict: BLOQUANT', 'OK')
+  expect(refused.deny).toContain('review BLOQUANT')
+  expect(spawns[0].subagentType ?? spawns[0].subagent_type).toBe('reviewer-agent')
+  expect(spawns[0].prompt).toContain('+ a line')
+  expect(spawns[0].prompt).toContain('annuler restaure l’état')
+  expect(JSON.parse(files[FILE]).taches[0].statut).toBe('en_cours')
+  const passed = await finishWithReview($, clock, '- OK inverse tested\nverdict: OK', 'BLOQUANT')
+  expect(String(passed.result)).toContain('review: OK')
+  const t = JSON.parse(files[FILE]).taches[0]
+  expect(t.statut).toBe('fait')
+  expect(t.relecture).toContain('reviewer-agent, agent ag-1')
+})
+
+test('a reviewer with no verdict line, one that cannot start, or one that never answers is a refusal', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  let deny: string | undefined
+  spawner(on, [], () => deny)
+  const { files } = world(on, { [FILE]: serialize(inProgress({ relecteur: 'reviewer-agent' })) }, [], { run: r => (r.argv[0] === 'git' && !r.argv.includes('--git-common-dir') ? out(0, '') : undefined) })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  expect((await finishWithReview($, clock, 'Looks fine to me.')).deny).toContain('no `verdict')
+  const silent = $.tool.call(FINISH)
+  await clock.settle()
+  await clock.advance(REVIEW_TIMEOUT_MS)
+  expect((await silent).deny).toContain('no answer within 20 min')
+  deny = 'unknown agent type'
+  expect((await $.tool.call(FINISH)).deny).toContain('could not start (unknown agent type)')
+  expect(JSON.parse(files[FILE]).taches[0].statut).toBe('en_cours')
+})
+
+test('the verdict is the last verdict line, made worse by any item marked worse', () => {
+  expect(parseVerdict('- OK a\n- OK b\nverdict: OK')).toBe('OK')
+  expect(parseVerdict('- A_CORRIGER no test for the inverse\n**Verdict : OK**')).toBe('A_CORRIGER')
+  expect(parseVerdict('verdict: BLOQUANT\n...\nverdict: OK')).toBe('OK')
+  expect(parseVerdict('Everything is OK.')).toBeNull()
+})
+
+test('an edit may not change the terms of a task in progress; notes and follow-up stay free', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const p = inProgress({ verification: 'make check' })
+  world(on, { [FILE]: serialize(p) })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const write = async (change: (q: Pilotage) => void) => {
+    const q = JSON.parse(serialize(p)) as Pilotage
+    change(q)
+    return $.tool.call({ tool: 'Write', file_path: `/p/${FILE}`, content: serialize(q) })
+  }
+  expect((await write(q => { q.taches[0].criteres = ['a'] })).deny).toContain('CON-01.criteres (in progress)')
+  expect((await write(q => { q.taches[0].risque_donnees = false })).deny).toContain('CON-01.risque_donnees')
+  expect((await write(q => { q.taches[0].invariant = '' })).deny).toContain('CON-01.invariant')
+  expect((await write(q => { q.taches[0].depend_de = ['CON-03'] })).deny).toContain('CON-01.depend_de')
+  expect((await write(q => { q.taches[0].bloque_par = ['Q-01'] })).deny).toContain('CON-01.bloque_par')
+  expect((await write(q => { q.projet.verification = 'true' })).deny).toContain('projet.verification')
+  expect((await write(q => { q.journal.push({ date: '2026-11-21', texte: 'CON-02 terminée' }) })).deny).toContain('journal')
+  expect((await write(q => { q.taches[0].notes = 'reworded'; q.taches[0].suivi = [{ date: '2026-11-21', fait: 'a', reste: 'b', suivant: 'c' }] })).deny).toBeUndefined()
+  expect((await write(q => { q.taches[1].criteres = ['a', 'b'] })).deny).toBeUndefined()
+})
+
+test('a status changed outside the mod is flagged in the pane and in pilotage_etat', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const p = inProgress()
+  expect(drift(p)).toEqual([])
+  // A shell write: CON-01 done and CON-02 in progress, with no move of the mod.
+  const shell = { ...p, taches: p.taches.map(t => (t.id === 'CON-01' ? { ...t, statut: 'fait' as const } : t.id === 'CON-02' ? { ...t, statut: 'en_cours' as const } : t)) }
+  expect(drift(shell)).toEqual([
+    'CON-01 is fait but the journal\'s last move left it en_cours: changed outside the mod?',
+    'CON-02 is en_cours but no move in the journal put it there: changed outside the mod?',
+  ])
+  world(on, { [FILE]: serialize(shell) })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const state = await $.tool.call({ tool: 'mcp__pilote__pilotage_etat' })
+  expect(String(state.result)).toContain('CON-01 is fait but')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /incohérence/ }))?.text).toContain('changed outside the mod')
+  await ui.unmount()
+})
+
+test('the moves the mod makes are recorded in the journal by task and status', () => {
+  const p = inProgress()
+  expect(p.journal.at(-1)).toEqual({ date: '2026-11-21', texte: 'CON-01 démarrée', tache: 'CON-01', statut: 'en_cours' })
+  expect(frozenEdits(p, p)).toEqual([])
 })

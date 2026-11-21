@@ -50,16 +50,33 @@ export type Question = {
   mots?: string
 }
 
+// One line of the journal. The mod writes `tache` and `statut` on every status move it makes,
+// so a status the journal does not explain was changed outside the mod.
+export type Entree = { date: string; texte: string; tache?: string; statut?: Statut }
+
+export type Projet = {
+  nom: string
+  promesse: string
+  maj: string
+  // Tasks one session may hold at once.
+  wip_max?: number
+  // Prefixes that lock together (generated code with its source): a path in one counts as a path in all.
+  zones_liees?: string[][]
+  // The project's local gate, run by tache_terminer in the main checkout with the task's paths in
+  // PILOTE_CHEMINS (one per line). Words split on spaces, no shell: "make check".
+  verification?: string
+  // The agent type tache_terminer spawns to review a task that touches user data.
+  relecteur?: string
+}
+
 export type Pilotage = {
   version: 1
-  // wip_max: tasks one session may hold at once. zones_liees: prefixes that lock together
-  // (generated code with its source), so a path in one counts as a path in all.
-  projet: { nom: string; promesse: string; maj: string; wip_max?: number; zones_liees?: string[][] }
+  projet: Projet
   jalons: Jalon[]
   scopes: Scope[]
   taches: Tache[]
   questions: Question[]
-  journal: { date: string; texte: string }[]
+  journal: Entree[]
 }
 
 // What the pane draws from: the file as last read.
