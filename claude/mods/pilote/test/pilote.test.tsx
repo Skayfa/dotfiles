@@ -319,9 +319,9 @@ test('without projet.verification the proof stays declared, and the result says 
 
 // The reviewer: spawned by the mod, its verdict read from its own answer. The kit keeps the agent id
 // to the engine (a hook that answers a spawn started none), so the agent is found by its description.
-function spawner(on: On, spawns: { prompt: string; subagentType?: string; subagent_type?: string; description?: string }[], deny: () => string | undefined) {
+function spawner(on: On, spawns: { prompt: string; subagentType?: string; subagent_type?: string; description?: string }[], deny: () => string | undefined, listed = () => true) {
   on('agent.spawn', (_, e) => (spawns.push(e), deny() ? { deny: deny() } : { model: 'm' }) as never)
-  on('agent.list', () => ({ value: spawns.map(s => ({ id: 'ag-1', description: s.description, type: 'reviewer-agent' })) }) as never)
+  on('agent.list', () => ({ value: listed() ? spawns.map(s => ({ id: 'ag-1', description: s.description, type: 'reviewer-agent' })) : [] }) as never)
 }
 
 function reviewWorld(on: On, answer: string | null) {
@@ -357,10 +357,11 @@ test('the review verdict comes from the reviewer the mod spawns, not from the de
   expect(t.relecture).toContain('reviewer-agent, agent ag-1')
 })
 
-test('a reviewer with no verdict line, one that cannot start, or one that never answers is a refusal', async ($, on) => {
+test('a reviewer with no verdict line, no answer, no id, or one that cannot start is a refusal', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   let deny: string | undefined
-  spawner(on, [], () => deny)
+  let listed = true
+  spawner(on, [], () => deny, () => listed)
   const { files } = world(on, { [FILE]: serialize(inProgress({ relecteur: 'reviewer-agent' })) }, [], { run: r => (r.argv[0] === 'git' && !r.argv.includes('--git-common-dir') ? out(0, '') : undefined) })
   await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
   expect((await finishWithReview($, clock, 'Looks fine to me.')).deny).toContain('no `verdict')
@@ -368,6 +369,12 @@ test('a reviewer with no verdict line, one that cannot start, or one that never 
   await clock.settle()
   await clock.advance(REVIEW_TIMEOUT_MS)
   expect((await silent).deny).toContain('no answer within 20 min')
+  const failed = $.tool.call(FINISH)
+  await clock.settle()
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't-2', agentId: 'ag-1', reason: 'error' })
+  expect((await failed).deny).toContain('ended without an answer')
+  listed = false
+  expect((await $.tool.call(FINISH)).deny).toContain('no agent id to wait for')
   deny = 'unknown agent type'
   expect((await $.tool.call(FINISH)).deny).toContain('could not start (unknown agent type)')
   expect(JSON.parse(files[FILE]).taches[0].statut).toBe('en_cours')
