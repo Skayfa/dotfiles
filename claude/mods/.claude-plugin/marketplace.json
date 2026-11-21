@@ -1,5 +1,8 @@
 {
   "name": "skayfa",
   "owner": { "name": "Skayfa" },
-  "plugins": [{ "name": "dolmen-ops", "source": "./dolmen-ops" }]
+  "plugins": [
+    { "name": "dolmen-ops", "source": "./dolmen-ops" },
+    { "name": "pilote", "source": "./pilote" }
+  ]
 }

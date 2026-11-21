@@ -146,7 +146,7 @@ flowchart TD
     GLOBAL -. "détaillé dans" .-> WF
 ```
 
-`~/.claude/CLAUDE.md` importe [`claude/GLOBAL.md`](claude/GLOBAL.md) (chargé dans tous les projets). Les skills et settings vivent dans `claude/`. Les mods (plugins de hooks) vivent dans `claude/mods/`, une marketplace locale que `install.sh` installe : `dolmen-ops` pour Dolmen ([README](claude/mods/dolmen-ops/README.md)). La boucle de travail : [`WORKFLOW.md`](WORKFLOW.md).
+`~/.claude/CLAUDE.md` importe [`claude/GLOBAL.md`](claude/GLOBAL.md) (chargé dans tous les projets). Les skills et settings vivent dans `claude/`. Les mods (plugins de hooks) vivent dans `claude/mods/`, une marketplace locale que `install.sh` installe : `dolmen-ops` pour Dolmen ([README](claude/mods/dolmen-ops/README.md)), `pilote` pour suivre un projet perso sans GitHub depuis son `pilotage/pilotage.json` ([README](claude/mods/pilote/README.md)). La boucle de travail : [`WORKFLOW.md`](WORKFLOW.md).
 
 ---
 

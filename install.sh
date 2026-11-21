@@ -154,10 +154,12 @@ for f in aliases plugins; do
 done
 
 # --- 5. Mods Claude Code (claude/mods : marketplace locale, lue depuis ce dossier) ---
-say "Mods Claude Code (dolmen-ops)"
+say "Mods Claude Code (dolmen-ops, pilote)"
 if command -v claude >/dev/null 2>&1; then
   claude plugin marketplace list 2>/dev/null | grep -q 'skayfa' || claude plugin marketplace add "$DOTFILES/claude/mods"
-  claude plugin install dolmen-ops@skayfa --scope user && echo "  mod      -> dolmen-ops (dans une session ouverte : /reload-plugins)"
+  for mod in dolmen-ops pilote; do
+    claude plugin install "$mod@skayfa" --scope user && echo "  mod      -> $mod (dans une session ouverte : /reload-plugins)"
+  done
 else
   echo "  claude absent : relancer install.sh après l'installation de Claude Code"
 fi
