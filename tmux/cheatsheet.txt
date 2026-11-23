@@ -18,6 +18,8 @@
        préfixe  N           historique des notifications Claude (Entrée = y aller)
        bannière macOS       quand un Claude finit (silencieuse) ou te bloque (avec son),
                             seulement si tu n'es pas dans Alacritty — clic = y aller
+       bouton Autoriser     sur une permission Bash courte : valide sans y aller
+                            (refusé si l'écran ne montre plus cette commande exacte)
 
    ▸ PANES  (les cadres dans une fenêtre)
        ⌥ ← / → / ↑ / ↓      aller au pane gauche/droite/haut/bas   ← SANS préfixe

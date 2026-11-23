@@ -91,6 +91,16 @@
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait perm"
+          }
+        ]
+      }
     ]
   }
 }

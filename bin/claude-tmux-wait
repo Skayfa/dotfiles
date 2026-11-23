@@ -2,6 +2,7 @@
 # claude-tmux-wait — tell you which Claude Code is waiting for you: tmux marker, macOS banner, history, board.
 #   on <kind>    mark the window of $TMUX_PANE, log it, send a banner
 #                kinds: done (hook Stop), permission | question | idle (hook Notification, by matcher)
+#   perm         note the pending permission (tool, command) on the pane  (hook PermissionRequest)
 #   prompt       you sent a prompt: clear the mark, the pane works   (hook UserPromptSubmit)
 #   off          clear the mark, a blocked pane works again          (hook PostToolUse)
 #   end          forget the pane                                     (hook SessionEnd)
@@ -9,6 +10,8 @@
 #   goto <id>    jump to tmux window <id>, e.g. @12                  (banner click, via Hammerspoon)
 #   history      browse past notifications, Enter jumps there        (tmux: prefix N)
 #   board        every Claude with its state, context, effort, live  (tmux: prefix A)
+#   approve <pane> <command>  answer "1. Yes" to a Bash permission prompt (banner button "Autoriser"),
+#                only if the pane shows that prompt with that exact command; else jump there
 # Each Claude pane carries its state in pane options: @claude_state (work | blocked | done), @claude_since,
 # @claude_last, plus @claude_ctx, @claude_effort and @claude_tx written by the status line.
 # Hook modes stay silent and always exit 0: a non-zero exit could block Claude.
@@ -56,8 +59,12 @@ mark_on() {
                 bg=$(field '.background_tasks // [] | length')
                 [ "${bg:-0}" -gt 0 ] 2>/dev/null && title="⏳ $project a fini son tour ($bg tâche(s) en fond)" ;;
     permission) title="🔐 $project demande une permission"
-                # The hook message is generic ("Claude needs your permission"): name the pending tool instead.
-                text=$(last_tool "$(field '.transcript_path // ""')")
+                # The hook message is generic ("Claude needs your permission"): name the pending tool, noted by
+                # the PermissionRequest hook (the transcript does not have it yet). A Bash call shows its command.
+                IFS=$'\x1f' read -r tname cmd text < <(tmux display -p -t "$TMUX_PANE" $'#{@claude_perm_tool}\x1f#{@claude_perm_cmd}\x1f#{@claude_perm_text}')
+                [ "$tname" = Bash ] || cmd=""
+                # The "Autoriser" button only for a short one-line command, shown whole in the banner.
+                [ "${#cmd}" -le 150 ] || cmd=""
                 [ -n "$text" ] || text=$(field '.message // ""') ;;
     question)   title="❓ $project te pose une question";   text=$(field '.message // ""') ;;
     *) return ;;
@@ -71,7 +78,9 @@ mark_on() {
   # Banner via Hammerspoon (hammerspoon/init.lua). Sound only when Claude is blocked on you.
   sound=0; [ "$kind" = done ] || sound=1
   query=$(jq -rn --arg t "$win" --arg ti "$title" --arg s "$session" --arg b "$text" --arg so "$sound" \
-    '"target=\($t|@uri)&title=\($ti|@uri)&subtitle=\($s|@uri)&body=\($b|@uri)&sound=\($so)"')
+    --arg p "$TMUX_PANE" --arg c "${cmd:-}" \
+    '"target=\($t|@uri)&title=\($ti|@uri)&subtitle=\($s|@uri)&body=\($b|@uri)&sound=\($so)"
+     + (if $c != "" then "&pane=\($p|@uri)&cmd=\($c|@uri)" else "" end)')
   open -g "hammerspoon://claude?$query"
 }
 
@@ -146,6 +155,23 @@ board() {
   goto "${pick%%$'\t'*}"
 }
 
+# Type "1" (Yes) in a pane, only when it shows a Bash permission prompt for exactly this command.
+# Anything else (stale banner, another prompt, copy mode, forged URL) types nothing and jumps there.
+approve() {
+  local pane=$1 cmd=$2 screen win
+  [[ $pane =~ ^%[0-9]+$ ]] && [ -n "$cmd" ] || return
+  win=$(tmux display -p -t "$pane" '#{window_id}' 2>/dev/null) || return
+  [ -n "$win" ] || return
+  screen=$(tmux capture-pane -p -J -t "$pane" 2>/dev/null)
+  if [ "$(tmux display -p -t "$pane" '#{pane_in_mode}')" = 0 ] &&
+     grep -q 'Do you want to proceed?' <<<"$screen" && grep -q '1\. Yes' <<<"$screen" && grep -qF -- "$cmd" <<<"$screen"; then
+    tmux send-keys -t "$pane" 1
+  else
+    tmux display "Permission non validée : la demande a changé, à toi de voir"
+    goto "$win"
+  fi
+}
+
 goto() {
   [[ $1 =~ ^@[0-9]+$ ]] || return
   if [ -z "$(tmux display -p -t "$1" '#{window_id}' 2>/dev/null)" ]; then
@@ -162,6 +188,20 @@ goto() {
 case "${1:-}" in
   on)
     [ -n "${TMUX_PANE:-}" ] && mark_on "${2:-done}" >/dev/null 2>&1
+    exit 0 ;;
+  perm)
+    # PermissionRequest reads stdout as a decision: print nothing, decide nothing.
+    if [ -n "${TMUX_PANE:-}" ] && [ ! -t 0 ]; then
+      {
+        payload=$(cat)
+        tname=$(jq -r '.tool_name // ""' <<<"$payload")
+        cmd=$(jq -r '.tool_input.command // ""' <<<"$payload")
+        case $cmd in *$'\n'*) cmd="" ;; esac
+        text=$(jq -r '"\(.tool_name) : \(.tool_input.command // .tool_input.description // .tool_input.file_path // .tool_input.url // .tool_input.pattern // "")"' <<<"$payload" | flatten 200)
+        tmux set -p -t "$TMUX_PANE" @claude_perm_tool "$tname" \; set -p -t "$TMUX_PANE" @claude_perm_cmd "$cmd" \
+          \; set -p -t "$TMUX_PANE" @claude_perm_text "$text"
+      } >/dev/null 2>&1
+    fi
     exit 0 ;;
   prompt)
     if [ -n "${TMUX_PANE:-}" ]; then
@@ -183,7 +223,7 @@ case "${1:-}" in
   end)
     if [ -n "${TMUX_PANE:-}" ]; then
       { tmux set -w -u -t "$TMUX_PANE" @claude_wait
-        for o in state since last ctx effort tx; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
+        for o in state since last ctx effort tx perm_tool perm_cmd perm_text; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
         tmux refresh-client -S; } >/dev/null 2>&1
     fi
     exit 0 ;;
@@ -198,6 +238,7 @@ case "${1:-}" in
     if [ -n "$target" ]; then goto "$target"; else tmux display "Aucun Claude ne t'attend"; fi
     ;;
   goto) goto "${2:-}" ;;
+  approve) approve "${2:-}" "${3:-}" ;;
   history) history ;;
   board) board ;;
   board-lines) board_lines ;;

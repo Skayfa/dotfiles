@@ -65,6 +65,8 @@ hs.hotkey.bind({ "ctrl", "alt" }, "T", toggleAlacritty)
 -- Claude Code banners, sent by bin/claude-tmux-wait as hammerspoon://claude?target=@12&title=...&body=...
 -- No banner while Alacritty is frontmost: the tmux marker already shows it.
 -- Click: bring Alacritty forward and jump to the tmux window that sent it.
+-- Permission for a short Bash command: an "Autoriser" button answers Yes, after claude-tmux-wait checks the
+-- pane still shows that exact prompt (otherwise it jumps there instead).
 -- Kept in Notification Center (withdrawAfter = 0); full history in tmux: prefix N.
 local claudeOk, claudeErr = pcall(function()
   local waitCmd = os.getenv("HOME") .. "/.local/bin/claude-tmux-wait"
@@ -77,8 +79,14 @@ local claudeOk, claudeErr = pcall(function()
     if app and app:isFrontmost() then
       return
     end
+    local pane, cmd = p.pane or "", p.cmd or ""
+    local canApprove = pane:match("^%%%d+$") ~= nil and cmd ~= ""
     hs.notify
-      .new(function()
+      .new(function(n)
+        if canApprove and n:activationType() == hs.notify.activationTypes.actionButtonClicked then
+          hs.task.new(waitCmd, nil, { "approve", pane, cmd }):start()
+          return
+        end
         local a = hs.application.find(appName)
         if a then
           showApp(a)
@@ -87,6 +95,8 @@ local claudeOk, claudeErr = pcall(function()
         end
         hs.task.new(waitCmd, nil, { "goto", target }):start()
       end, {
+        hasActionButton = canApprove,
+        actionButtonTitle = "Autoriser",
         title = p.title or "Claude",
         subTitle = p.subtitle or "",
         informativeText = p.body or "",
