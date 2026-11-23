@@ -31,11 +31,13 @@ brew "libpq"   # client psql — requis par vim-dadbod (keg-only → linké dans
 brew "neovim"
 cask "zed"
 
-# Go (gopls/goimports via mason + gofmt) + proto (buf)
+# Go (gofmt) + proto (buf). gopls via brew, sur le PATH : le plugin gopls-lsp de Claude Code
+# en a besoin (nvim garde le sien via mason).
 # (le CLI tree-sitter est installé via npm dans install.sh, pas via brew)
 # (Rust : via rustup dans install.sh, pas brew — rustup gère toolchain + composants,
 #  et fournit un rust-analyzer/rustfmt accordés à la version de rustc)
 brew "go"
+brew "gopls"
 brew "buf"
 
 # Node (requis par tree-sitter-cli, prettierd, certains LSP)

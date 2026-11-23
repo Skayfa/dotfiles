@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# dotfiles-doctor — check that the whole setup is installed and wired: tools, links, copies, Claude hooks,
+# Hammerspoon, tmux, fzf, starship. Read-only. Prints ✓ / ! (drift) / ✗ (broken); exits 1 on any ✗.
+# Run by install.sh at the end, or by hand: dotfiles-doctor
+
+DOTFILES=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+G=$'\033[38;2;167;192;128m' Y=$'\033[38;2;219;188;127m' R=$'\033[38;2;230;126;128m' B=$'\033[1m' N=$'\033[0m'
+fails=0 warns=0
+ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$1"; }
+warn() { printf '  %s!%s %s\n' "$Y" "$N" "$1"; warns=$((warns + 1)); }
+fail() { printf '  %s✗%s %s\n' "$R" "$N" "$1"; fails=$((fails + 1)); }
+section() { printf '\n%s%s%s\n' "$B" "$1" "$N"; }
+
+section "Outils"
+missing=""
+for t in git tmux jq fzf fd zed gh lazygit hunk starship nvim gopls; do
+  command -v "$t" >/dev/null 2>&1 || missing+=" $t"
+done
+[ -z "$missing" ] && ok "tous présents (git tmux jq fzf fd zed gh lazygit hunk starship nvim gopls)" \
+  || fail "absents :$missing  → brew bundle --file=$DOTFILES/Brewfile"
+if brew bundle check --file="$DOTFILES/Brewfile" >/dev/null 2>&1; then ok "Brewfile satisfait"
+else warn "Brewfile pas satisfait  → brew bundle check --verbose --file=$DOTFILES/Brewfile"; fi
+
+section "Fichiers liés au dépôt"
+before=$fails
+# Every link_file line of install.sh: the destination must be a symlink to the repo file.
+while read -r src dst; do
+  src=${src//\$DOTFILES/$DOTFILES}; dst=${dst//\$HOME/$HOME}
+  if [ "$(readlink "$dst")" = "$src" ]; then :; else fail "$dst ne pointe pas vers $src  → ./install.sh"; fi
+done < <(sed -n 's/^link_file "\([^"]*\)" *"\([^"]*\)".*/\1 \2/p' "$DOTFILES/install.sh")
+[ "$fails" -eq "$before" ] && ok "tous les liens de install.sh sont en place"
+
+section "Fichiers copiés (avec __HOME__)"
+same() { cmp -s <(sed "s|__HOME__|$HOME|g" "$1") "$2"; }
+same "$DOTFILES/alacritty/alacritty.toml" "$HOME/.config/alacritty/alacritty.toml" && ok "alacritty" \
+  || warn "alacritty diffère du dépôt  → ./install.sh"
+same "$DOTFILES/lazygit/config.yml" "$HOME/Library/Application Support/lazygit/config.yml" && ok "lazygit" \
+  || warn "lazygit diffère du dépôt (lazygit réécrit sa config)  → comparer, puis ./install.sh"
+nvim_drift=$(diff -rq "$DOTFILES/nvim/lua" "$HOME/.config/nvim/lua" 2>&1 | head -3)
+[ -z "$nvim_drift" ] && ok "nvim" || warn "nvim diffère du dépôt  → ./install.sh : $(echo "$nvim_drift" | head -1)"
+
+section "Claude Code"
+S="$HOME/.claude/settings.json"
+if jq empty "$S" 2>/dev/null; then
+  before=$fails
+  for ev in Stop Notification PermissionRequest UserPromptSubmit PostToolUse SessionEnd; do
+    cmds=$(jq -r --arg e "$ev" '.hooks[$e][]?.hooks[]?.command' "$S")
+    if [ -z "$cmds" ]; then fail "hook $ev absent  → ./install.sh"; continue; fi
+    while read -r c; do
+      bin=${c%% *}
+      [ -x "$bin" ] || fail "hook $ev : $bin introuvable ou non exécutable"
+    done <<<"$cmds"
+  done
+  [ "$fails" -eq "$before" ] && ok "hooks branchés sur claude-tmux-wait (fin, permission, question, reprise, sortie)"
+  sl=$(jq -r '.statusLine.command // ""' "$S" | awk '{print $NF}')
+  [ -f "$sl" ] && ok "statusline ($sl)" || fail "statusline introuvable : $sl"
+  if [ "$(jq -r '.enabledPlugins."gopls-lsp@claude-plugins-official" // false' "$S")" = true ]; then
+    command -v gopls >/dev/null && ok "plugin gopls-lsp actif, gopls présent" || fail "plugin gopls-lsp actif mais gopls absent  → brew install gopls"
+  fi
+  # The repo wins in install.sh's merge: a key it sets differently would be overwritten.
+  drift=$(jq -r --slurpfile repo <(sed "s|__HOME__|$HOME|g" "$DOTFILES/claude/settings.json") -n '
+    ($repo[0] | del(.hooks)) as $r | input as $l
+    | [$r | paths(scalars) as $p | select(($l | getpath($p)) != null and ($l | getpath($p)) != ($r | getpath($p))) | $p | map(tostring) | join(".")] | join(", ")' "$S")
+  [ -z "$drift" ] && ok "réglages du dépôt alignés sur les tiens" \
+    || warn "le dépôt écraserait au prochain install.sh : $drift"
+else
+  fail "$S illisible"
+fi
+
+section "Hammerspoon"
+if pgrep -x Hammerspoon >/dev/null; then ok "lancé (dropdown Ctrl+Alt+T, bannières Claude)"
+else fail "pas lancé  → open -a Hammerspoon"; fi
+if command -v luajit >/dev/null; then
+  err=$(F="$HOME/.hammerspoon/init.lua" luajit -e 'local _, e = loadfile(os.getenv("F")); if e then io.write(e) end' </dev/null)
+  [ -z "$err" ] && ok "init.lua valide" || fail "init.lua invalide : $err"
+fi
+
+section "tmux"
+if tmux source-file -n "$HOME/.tmux.conf" 2>/dev/null; then ok "tmux.conf valide"; else fail "tmux.conf invalide  → tmux source-file -n ~/.tmux.conf"; fi
+if tmux info >/dev/null 2>&1; then
+  nokey=""
+  for k in a A N S e g h; do tmux list-keys -T prefix "$k" >/dev/null 2>&1 || nokey+=" $k"; done
+  [ -z "$nokey" ] && ok "raccourcis préfixe a A N S e g h chargés" || warn "raccourcis absents :$nokey  → préfixe r"
+  [ "$(tmux show-environment -g FZF_DEFAULT_OPTS_FILE 2>/dev/null)" = "FZF_DEFAULT_OPTS_FILE=$HOME/.config/fzf/fzfrc" ] \
+    && ok "popups : fzf Everforest" || warn "popups sans fzfrc  → préfixe r"
+else
+  warn "serveur tmux arrêté : raccourcis non vérifiés"
+fi
+
+section "Shell"
+if echo x | FZF_DEFAULT_OPTS_FILE="$HOME/.config/fzf/fzfrc" fzf --filter x >/dev/null 2>&1; then ok "fzfrc valide"
+else fail "fzfrc invalide  → echo x | FZF_DEFAULT_OPTS_FILE=~/.config/fzf/fzfrc fzf --filter x"; fi
+if starship prompt >/dev/null 2>&1; then ok "starship valide"; else fail "starship invalide  → starship explain"; fi
+
+printf '\n'
+if [ "$fails" -gt 0 ]; then printf '%s%d problème(s), %d écart(s).%s\n' "$R" "$fails" "$warns" "$N"; exit 1
+elif [ "$warns" -gt 0 ]; then printf '%sTout est relié, %d écart(s) à regarder.%s\n' "$Y" "$warns" "$N"
+else printf '%s✓ Tout est relié.%s\n' "$G" "$N"; fi

@@ -129,7 +129,8 @@ link_file "$DOTFILES/bin/ccw"      "$HOME/.local/bin/ccw"
 link_file "$DOTFILES/bin/zed-open" "$HOME/.local/bin/zed-open"
 link_file "$DOTFILES/bin/hunk-log" "$HOME/.local/bin/hunk-log"
 link_file "$DOTFILES/bin/claude-tmux-wait" "$HOME/.local/bin/claude-tmux-wait"
-chmod +x "$DOTFILES/bin/ccw" "$DOTFILES/bin/zed-open" "$DOTFILES/bin/hunk-log" "$DOTFILES/bin/claude-tmux-wait"
+link_file "$DOTFILES/bin/dotfiles-doctor" "$HOME/.local/bin/dotfiles-doctor"
+chmod +x "$DOTFILES/bin/ccw" "$DOTFILES/bin/zed-open" "$DOTFILES/bin/hunk-log" "$DOTFILES/bin/claude-tmux-wait" "$DOTFILES/bin/dotfiles-doctor"
 
 # tmux : TPM + plugins (resurrect/continuum) déclarés dans tmux.conf
 say "Installation des plugins tmux (TPM)"
@@ -166,6 +167,10 @@ else
   echo "  claude absent : relancer install.sh après l'installation de Claude Code"
 fi
 
+# --- Vérification : toute la chaîne est-elle reliée ? ---
+say "Vérification (dotfiles-doctor)"
+"$DOTFILES/bin/dotfiles-doctor" || true
+
 # --- Fin ---
 say "Terminé ✅"
 cat <<EOF
@@ -176,6 +181,9 @@ cat <<EOF
   3. Hammerspoon : Réglages Système > Confidentialité > Accessibilité > active Hammerspoon
   4. Relance Alacritty (⌘Q puis rouvre) pour charger la police Nerd Font + le binding ⌘b
   5. Active le drop-down : icône Hammerspoon > Reload Config, puis Ctrl+Alt+T
+  6. Notifications : Réglages Système > Notifications > Hammerspoon > autoriser
+     (bannières Claude, bouton « Autoriser »)
+  7. À tout moment : dotfiles-doctor  (vérifie que tout est relié)
 
 Toutes les anciennes configs ont été sauvegardées en *.bak.$TS
 EOF

@@ -11,11 +11,11 @@ Vue d'ensemble de **comment tout est implémenté et câblé** — du terminal j
 ```mermaid
 flowchart TD
     OS(["macOS · Apple Silicon"])
-    HS["Hammerspoon<br/>dropdown Ctrl+Alt+T"]
+    HS["Hammerspoon<br/>dropdown Ctrl+Alt+T · bannières Claude"]
     ALA["Alacritty<br/>émulateur terminal"]
     TMUX["tmux<br/>multiplexer (panes / fenêtres / sessions)"]
     ZSH["zsh + Starship<br/>shell"]
-    ZED["Zed<br/>éditeur GUI"]
+    ZED["Zed<br/>l'IDE : lire, naviguer"]
 
     OS --> ALA
     OS --> HS
@@ -23,9 +23,10 @@ flowchart TD
     ALA --> TMUX
     TMUX --> ZSH
     ALA -. "Cmd+Shift+clic → zed-open" .-> ZED
+    TMUX -. "préfixe e" .-> ZED
 
     subgraph lanc["Lancés depuis zsh / tmux"]
-        NVIM["Neovim · NvChad 2.5<br/>éditeur principal"]
+        NVIM["Neovim · NvChad 2.5<br/>retouches rapides"]
         LG["lazygit<br/>git TUI — stage / commit / push"]
         HK["hunk<br/>diff viewer de review"]
         DBC["Clients DB<br/>pgcli · lazysql · dadbod-ui"]
@@ -37,7 +38,7 @@ flowchart TD
     CLAUDE["Claude Code"] -. "annote le diff<br/>(daemon local)" .-> HK
 ```
 
-**Principe** : macOS → Alacritty (terminal) → tmux (découpe l'écran, garde les sessions) → zsh (shell + prompt) → on lance nvim / lazygit / hunk / clients DB. Zed est l'éditeur GUI, ouvert depuis le terminal par un clic sur un chemin.
+**Principe** : macOS → Alacritty (terminal) → tmux (découpe l'écran, garde les sessions) → zsh (shell + prompt) → on lance lazygit / hunk / clients DB. Le code est surtout écrit par Claude : **Zed** sert à le lire et y naviguer (`préfixe e` ouvre le projet du pane, `Cmd+Shift+clic` un fichier) ; nvim reste pour une retouche rapide dans le terminal. Une seule palette partout : **Everforest Dark**.
 
 **Git, deux outils complémentaires** : **hunk** lit le changeset (et c'est la seule surface où Claude pose sa review, en annotations inline via un daemon local) ; **lazygit** fait le reste (stage, commit, push, branches). hunk ne sait pas commiter, lazygit ne sait pas annoter.
 
@@ -57,7 +58,14 @@ flowchart TD
 | `git hdiff` / `git hshow`      | git (alias `~/.config/git/config`)   | diff / commit via **hunk** (le pager par défaut reste intact)   |
 | préfixe `D`                    | tmux popup                           | **lazysql** (bases de données)                                  |
 | préfixe `?`                    | tmux popup                           | aide-mémoire `tmux/cheatsheet.txt`                              |
-| `⌥ ←/→/↑/↓`                    | tmux (sans préfixe)                  | naviguer entre panes                                            |
+| préfixe `e`                    | tmux → `zed`                         | ouvre le projet du pane dans **Zed**                            |
+| préfixe `S` / `Tab`            | tmux popup / tmux 3.8                | changer de session / chercher fenêtre ou session                |
+| préfixe `a`                    | tmux → `claude-tmux-wait next`       | aller au prochain **Claude qui t'attend** (toutes sessions)     |
+| préfixe `A`                    | tmux popup → `claude-tmux-wait board`| **tableau de tous les Claude** (état, contexte, effort), en direct |
+| préfixe `N`                    | tmux popup → `claude-tmux-wait history` | historique des notifications Claude                          |
+| clic / « Autoriser » sur une bannière | Hammerspoon → `claude-tmux-wait goto/approve` | aller à la fenêtre / valider une permission Bash courte |
+| `⌥ ←/→/↑/↓`                    | tmux (sans préfixe)                  | pane voisin s'il existe, sinon la touche passe (⌥←/→ = mot)    |
+| `⌘ ←/→`                        | Alacritty                            | début / fin de ligne (Ctrl-A / Ctrl-E)                          |
 | `Shift ←/→`                    | tmux (sans préfixe)                  | fenêtre précédente / suivante                                   |
 | `cheat` / `Ctrl-X ?`           | zsh                                  | aide-mémoire ligne de commande (`zsh/cheatsheet.txt`)           |
 | `db <name>`                    | zsh                                  | **pgcli** sur une base Postgres locale                          |
@@ -86,7 +94,9 @@ Tout est dans [`zsh/plugins.zsh`](zsh/plugins.zsh), sourcé **en dernier** par `
 
 ---
 
-## 4. L'éditeur (Neovim / NvChad 2.5)
+## 4. nvim (NvChad 2.5) — retouches rapides
+
+L'IDE du quotidien est Zed (`préfixe e`). nvim reste configuré pour éditer vite sans quitter le terminal.
 
 ```mermaid
 flowchart TD
@@ -146,6 +156,34 @@ flowchart TD
     GLOBAL -. "détaillé dans" .-> WF
 ```
 
+### Claude ↔ toi : savoir qui t'attend
+
+Plusieurs Claude tournent en parallèle dans tmux. Un seul script, [`bin/claude-tmux-wait`](bin/claude-tmux-wait), branché sur les hooks de Claude Code ([`claude/settings.json`](claude/settings.json)), tient tout à jour :
+
+```mermaid
+flowchart LR
+    subgraph cc["Claude Code (un par pane tmux)"]
+        H["hooks<br/>Stop · Notification · PermissionRequest<br/>UserPromptSubmit · PostToolUse · SessionEnd"]
+        SL["statusline<br/>contexte · effort · transcript"]
+    end
+    W["bin/claude-tmux-wait"]
+    H --> W
+    SL -- "options du pane" --> PANE
+    W -- "@claude_wait (fenêtre)<br/>@claude_state… (pane)" --> PANE["tmux"]
+    PANE --> TAB["● sur l'onglet<br/>« pro ● » dans la barre"]
+    PANE --> NEXT["préfixe a<br/>prochain qui attend"]
+    PANE --> BOARD["préfixe A<br/>tableau en direct"]
+    W -- "history.tsv" --> HIST["préfixe N<br/>historique"]
+    W -- "hammerspoon://claude" --> HS["Hammerspoon<br/>bannière macOS"]
+    HS -- "clic → goto" --> PANE
+    HS -- "Autoriser → approve<br/>(vérifie l'écran)" --> H
+```
+
+- **Fini** (`Stop`) ou **bloqué** (permission, question) → ● sur l'onglet, ligne d'historique, bannière (son seulement quand bloqué, aucune si Alacritty est devant).
+- **Tu réponds** (`UserPromptSubmit`) ou il reprend (`PostToolUse`) → le ● s'éteint ; **il quitte** (`SessionEnd`) → le pane est oublié.
+- La **commande** d'une permission vient de `PermissionRequest` (la transcription ne l'a pas encore) ; le bouton « Autoriser » ne tape `1` que si le pane montre encore cette demande pour cette commande exacte.
+- `bin/dotfiles-doctor` vérifie toute la chaîne.
+
 `~/.claude/CLAUDE.md` importe [`claude/GLOBAL.md`](claude/GLOBAL.md) (chargé dans tous les projets). Les skills et settings vivent dans `claude/`. Les mods (plugins de hooks) vivent dans `claude/mods/`, une marketplace locale que `install.sh` installe : `dolmen-ops` pour Dolmen ([README](claude/mods/dolmen-ops/README.md)), `pilote` pour suivre un projet perso sans GitHub depuis son `pilotage/pilotage.json` ([README](claude/mods/pilote/README.md)). La boucle de travail : [`WORKFLOW.md`](WORKFLOW.md).
 
 ---
@@ -160,15 +198,16 @@ dotfiles/
 ├── WORKFLOW.md           # la MÉTHODE de dev (challenge → livraison fidèle)
 ├── ARCHITECTURE.md       # CE fichier (l'outillage)
 ├── alacritty/            # alacritty.toml (couleurs Everforest, hints→zed, Cmd+B→tmux)
-├── hammerspoon/          # init.lua (dropdown)
-├── tmux/                 # tmux.conf + cheatsheet.txt (popups g/G/D/?)
+├── hammerspoon/          # init.lua (dropdown + bannières Claude)
+├── tmux/                 # tmux.conf + cheatsheet.txt (popups, barre, tableau Claude)
+├── fzf/                  # fzfrc (options + couleurs, partagé shell / popups tmux)
 ├── zsh/                  # plugins.zsh (UX) + aliases.zsh + cheatsheet.txt
 ├── starship/             # starship.toml (prompt)
 ├── lazygit/              # config.yml
 ├── hunk/                 # config.toml (diff viewer de review + annotations agent)
 ├── git/                  # config (alias hdiff/hshow ; l'identité reste dans ~/.gitconfig)
 ├── nvim/                 # config NvChad 2.5 complète (lua/…)
-├── bin/                  # ccw (worktrees) · zed-open (ouvre un chemin dans Zed)
+├── bin/                  # claude-tmux-wait · dotfiles-doctor · zed-open · hunk-log · ccw
 └── claude/               # CLAUDE.md · GLOBAL.md · settings.json · skills/ · mods/
 ```
 
@@ -203,7 +242,7 @@ Le lien est le défaut. On ne copie que si c'est impossible autrement : chemin a
 
 | Versionné (repo public)                                                                                       | Local (hors repo)                                                                             |
 | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Tout l'outillage générique : alacritty, tmux, zsh, nvim, starship, lazygit, hunk, claude, bin, Brewfile, install.sh | Connexions DB d'un projet (`~/Library/Application Support/lazysql/`, `~/.local/share/db_ui/`) |
+| Tout l'outillage générique : alacritty, tmux, zsh, nvim, starship, lazygit, hunk, fzf, hammerspoon, claude, bin, Brewfile, install.sh | Connexions DB d'un projet (`~/Library/Application Support/lazysql/`, `~/.local/share/db_ui/`) |
 | La méthode (`GLOBAL.md`, skills)                                                                              | Tokens / secrets MCP (jamais commités)                                                        |
 | `git/config` : le **générique** de git (alias `hdiff`/`hshow`)                                                | `~/.gitconfig` : l'**identité** git (`user.name` / `user.email`) — jamais versionnée          |
 |                                                                                                               | `~/.zshrc`, `~/.tmux.conf`, `~/.config/nvim` (générés depuis le repo)                         |

@@ -13,7 +13,7 @@ map("i", "jk", "<ESC>")
 map("n", "<C-LeftMouse>", "<LeftMouse><cmd>lua vim.lsp.buf.definition()<CR>", { desc = "LSP définition (ctrl+clic)" })
 map("n", "<RightMouse>", "<LeftMouse><cmd>lua vim.lsp.buf.definition()<CR>", { desc = "LSP définition (clic droit)" })
 
--- Retour / avant (jumplist) : Ctrl-o / Ctrl-i  (⌥←/→ sont pris par tmux pour les panes)
+-- Retour / avant (jumplist) : Ctrl-o / Ctrl-i  (⌥←/→ : tmux les garde pour le pane voisin quand il en existe un)
 map("n", "<X1Mouse>", "<C-o>", { desc = "Nav: retour (souris)" })
 map("n", "<X2Mouse>", "<C-i>", { desc = "Nav: avant (souris)" })
 
