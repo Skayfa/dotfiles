@@ -36,6 +36,7 @@ Une tâche est **prête** quand son jalon a son go, que ses dépendances sont fa
 
 - **Un seul fichier.** Le pilotage vit dans le checkout principal (le dossier qui tient le `.git` commun). Une session ouverte dans un worktree lit et écrit celui-là ; la copie de son worktree est refusée en édition.
 - **Une tâche a un tenant.** `tache_demarrer` écrit la session dans `tenue_par`. Note, fin et suspension sont refusées à une autre session ; une session arrêtée se reprend avec `reprendre: true` (bouton *Reprendre* sur une tâche immobile).
+- **Une tâche que rien ne fait avancer réveille sa session.** Le mod suit la vie de la session : un tour en cours, un agent qui tourne (`$.agent.list`), le dernier mouvement d'un tour. Quand la session tient une tâche en cours et que rien n'a bougé depuis 15 min (ni tour, ni agent), il lui envoie une fois « plus aucun agent ne tourne : vérifie, relance, puis tache_note ». Seulement si la session avait délégué à des agents depuis ton dernier message (une session qui t’attend n’est pas réveillée), et une seule fois jusqu’à ton prochain message : la réponse au réveil ne le réarme pas. Cas réel : un agent annoncé comme lancé qui n'a jamais tourné, une session qui attend un réveil qui ne viendra pas.
 - **`wip_max` par session** (2 par défaut).
 - **Chemins verrouillés.** Chaque tâche déclare les `chemins` qu'elle écrit. Une tâche ne démarre pas si une tâche en cours écrit un même chemin. `projet.zones_liees` lie des préfixes qui verrouillent ensemble (le code généré et sa source).
 - **Écritures concurrentes.** Chaque mouvement relit le fichier juste avant d'écrire et se rejoue sur ce qu'une autre session a écrit entre-temps. La fenêtre restante est celle entre la dernière lecture et l'écriture.
@@ -62,6 +63,7 @@ La dernière ligne du panneau liste ce qui cloche dans le backlog : un cycle de 
 - La gate tourne dans le checkout principal : le travail d'un worktree qui n'y est pas encore n'est pas ce qu'elle vérifie. Elle est bornée à 10 min (la limite de `$.process.run`).
 - L'attente du relecteur vit dans le module : un rechargement du mod pendant une relecture la perd, et `tache_terminer` refuse au bout de 20 min.
 - Une session qui tourne encore la 0.1.0 réécrit `projet` sans `verification` ni `relecteur` : poser ces clés seulement quand toutes les sessions ont rechargé la 0.2.0.
+- Le réveil ne voit pas une commande lancée en arrière-plan par le shell : une session qui attend un long build lancé ainsi peut être réveillée une fois pour rien, et le dira. Il vit dans le module : un rechargement remet son compteur à zéro.
 - Les chemins verrouillent le démarrage, pas encore chaque écriture : une session peut écrire hors des chemins de sa tâche.
 
 ## Commandes et panneau

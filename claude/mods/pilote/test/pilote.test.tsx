@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Pilotage } from '../types'
-import { FILE, REVIEW_TIMEOUT_MS, cutErrors, drift, drop, finish, frozenEdits, go, parse, parseVerdict, serialize, start, statut, statusMoves } from '../hooks/rules.ts'
+import { FILE, REVIEW_TIMEOUT_MS, STALL_MS, cutErrors, stalled, drift, drop, finish, frozenEdits, go, parse, parseVerdict, serialize, start, statut, statusMoves } from '../hooks/rules.ts'
 
 const NOW = Date.parse('2026-11-21T10:00:00Z')
 
@@ -431,4 +431,58 @@ test('the moves the mod makes are recorded in the journal by task and status', (
   const p = inProgress()
   expect(p.journal.at(-1)).toEqual({ date: '2026-11-21', texte: 'CON-01 démarrée', tache: 'CON-01', statut: 'en_cours' })
   expect(frozenEdits(p, p)).toEqual([])
+})
+
+// --- a held task nothing works on ---------------------------------------------------------------
+
+const held = (): Pilotage => {
+  const p = base()
+  p.jalons[0].go = '2026-11-21'
+  p.taches[0] = { ...p.taches[0], statut: 'en_cours', tenue_par: 'sess-1', debut: '2026-11-21', depuis: '2026-11-21' }
+  return p
+}
+
+test('a held task is stalled once its agents are gone and nothing moved for 15 min, once until the owner writes', () => {
+  const p = held()
+  const quiet = { busy: false, lastActivity: NOW, delegated: true }
+  expect(stalled(p, 'sess-1', quiet, NOW + STALL_MS - 1, new Set())).toEqual([])
+  expect(stalled(p, 'sess-1', { ...quiet, busy: true }, NOW + STALL_MS, new Set())).toEqual([])
+  expect(stalled(p, 'sess-1', { ...quiet, delegated: false }, NOW + STALL_MS, new Set())).toEqual([])
+  expect(stalled(p, 'sess-2', quiet, NOW + STALL_MS, new Set())).toEqual([])
+  expect(stalled(p, 'sess-1', quiet, NOW + STALL_MS, new Set()).map(t => t.id)).toEqual(['CON-01'])
+  p.taches[0].suivi = [{ date: '2026-11-21', fait: 'a', reste: 'b', suivant: 'c' }]
+  expect(stalled(p, 'sess-1', quiet, NOW + 3 * STALL_MS, new Set(['CON-01']))).toEqual([])
+})
+
+test('the session holding a stalled task is woken once; its reply does not re-arm it, the owner does', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { prompts } = world(on, { [FILE]: serialize(held()) })
+  let agents: { status: string }[] = [{ status: 'running' }]
+  on('agent.list', () => ({ value: agents }) as never)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const woke = () => prompts.filter(x => x.includes('plus aucun agent ne tourne'))
+
+  await clock.advance(STALL_MS + 10_000)
+  expect(woke()).toEqual([])
+
+  agents = []
+  await clock.advance(10_000)
+  expect(woke().length).toBe(1)
+  expect(woke()[0]).toContain('CON-01')
+
+  // The wake's reply: a turn and a note. Later silence does not wake it again.
+  await $.turn.start({ turnId: 't1' } as never)
+  await $.tool.call({ tool: 'mcp__pilote__tache_note', id: 'CON-01', fait: 'a', reste: 'b', suivant: 'c' })
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'ok', text: 'ok', durationMs: 1, isAborted: false } as never)
+  await clock.advance(3 * STALL_MS)
+  expect(woke().length).toBe(1)
+
+  // The owner writes and delegates again: the next silence wakes it once more.
+  await $.prompt.submit({ text: 'continue' })
+  agents = [{ status: 'running' }]
+  await clock.advance(5_000)
+  agents = []
+  await clock.advance(STALL_MS + 10_000)
+  expect(woke().length).toBe(2)
 })

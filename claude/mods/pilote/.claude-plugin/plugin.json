@@ -1,6 +1,6 @@
 {
   "name": "pilote",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Project tracking without GitHub: pilotage/pilotage.json is the truth, the code guards the gates (milestone go, open questions, dependencies, WIP, proof to finish), the model decides, and a pane shows what waits for you",
   "types": "./types/index.d.ts"
 }

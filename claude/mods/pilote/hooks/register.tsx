@@ -7,7 +7,7 @@ import type { Armed, Pilotage, Snapshot, Tache } from '../types'
 import {
   FILE, GATE_TIMEOUT_MS, REVIEW_TIMEOUT_MS, ask, coursRows, drop, currentJalon, decide, finish, finishable, frozenEdits, gateArgv,
   gateLine, gateProof, go, jalonCounts, nextRows, note, parse, parseVerdict, reviewPrompt, scopeCounts, serialize, splitPaths, start,
-  statusMoves, summary, suspend, tail, toiRows, type GateRun, type Move, type Review, type Row,
+  statusMoves, stalled, summary, suspend, tail, toiRows, wakeText, type GateRun, type Move, type Review, type Row,
 } from './rules.ts'
 
 const PANE = 'pilote'
@@ -36,6 +36,12 @@ const METHOD = [
 let root = ''
 let cwd = ''
 let session = ''
+// This session's life, for the stall check: main turn running, last move of any loop, tasks already told.
+let mainRunning = false
+let lastActivity = 0
+let delegated = false
+const woken = new Set<string>()
+let wakeSent = ''
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const where = () => (root ? `${root}/${FILE}` : FILE)
@@ -240,6 +246,27 @@ async function press($: EngineInterface, a: NonNullable<Row['action']>): Promise
   $.clock.after(CONFIRM_MS, () => void update($, armed, cur => (cur?.id === a.id && cur.at === at ? null : cur)))
 }
 
+// --- a held task nothing works on: wake the session once -----------------------------------------
+
+async function checkStall($: EngineInterface, p: Pilotage): Promise<void> {
+  if (!session || !lastActivity) return
+  if (mainRunning) {
+    // A turn runs: only note whether it has delegated.
+    if (!delegated && (await $.agent.list().catch(() => [])).some(a => a.status === 'running')) delegated = true
+    return
+  }
+  const now = await $.clock.now()
+  const agents = await $.agent.list().catch(() => [])
+  const busy = agents.some(a => a.status === 'running')
+  if (busy) delegated = true
+  const ts = stalled(p, session, { busy, lastActivity, delegated }, now, woken)
+  if (!ts.length) return
+  for (const t of ts) woken.add(t.id)
+  $.ui.toast(`${ts.map(t => t.id).join(', ')} : rien ne tourne, session relancée`)
+  wakeSent = wakeText(ts, Math.round((now - lastActivity) / 60_000))
+  void $.prompt.submit({ text: wakeSent })
+}
+
 // --- registration ------------------------------------------------------------------------------
 
 export const register: Register = on => {
@@ -250,7 +277,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'pilotage', description: 'Ouvre le panneau de pilotage et résume le projet' })
     await $.command.register({ name: 'go', description: 'Donne le go d’un jalon (tapé par toi seulement)', argumentHint: '<jalon>' })
     await registerTools($)
-    $.clock.every(TICK_MS, () => void refresh($).catch(() => {}))
+    lastActivity = await $.clock.now()
+    $.clock.every(TICK_MS, () => void refresh($).then(s => (s.data ? checkStall($, s.data) : undefined)).catch(() => {}))
     const s = await refresh($, true)
     if (s.isFound) void $.ui.open({ id: PANE, title: `Pilotage · ${s.data?.projet.nom ?? ''}` })
     return next(e)
@@ -309,8 +337,26 @@ export const register: Register = on => {
     apply($, (p, now) => note(p, str(e.id), { fait: str(e.fait), reste: str(e.reste), suivant: str(e.suivant) }, now, session)))
   on('tool.call', { tool: 'mcp__pilote__tache_terminer' }, async ($, e, next) => terminer($, e as Record<string, unknown>, next.signal))
 
+  // Someone wrote (the owner, a peer): a new start for the stall check. The wake's own prompt is not.
+  on('prompt.submit', ($, e, next) => {
+    if (!e.isMeta && e.text !== wakeSent) {
+      woken.clear()
+      delegated = false
+    }
+    return next(e)
+  })
+
+  // Life of the session, for the stall check: any loop's turn is a move; the main loop's says if it runs.
+  on('turn.start', async ($, e, next) => {
+    lastActivity = await $.clock.now()
+    if (e.agentId === undefined) mainRunning = true
+    return next(e)
+  })
+
   // A subagent's answer: what a review spawned by tache_terminer waits for.
-  on('turn.complete', ($, e, next) => {
+  on('turn.complete', async ($, e, next) => {
+    lastActivity = await $.clock.now()
+    if (e.agentId === undefined) mainRunning = false
     const id = e.agentId
     if (id) {
       const answer = e.reason === 'answer' ? e.answer : null

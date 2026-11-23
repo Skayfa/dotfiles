@@ -67,6 +67,14 @@ if jq empty "$S" 2>/dev/null; then
 else
   fail "$S illisible"
 fi
+# Each mod of the repo's marketplace: the installed version is the repo's (else the sessions run old code).
+stale=""
+for m in "$DOTFILES"/claude/mods/*/.claude-plugin/plugin.json; do
+  n=$(jq -r .name "$m"); v=$(jq -r .version "$m")
+  iv=$(jq -r --arg k "$n@skayfa" '.plugins[$k][0].version // "absent"' "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null)
+  [ "$iv" = "$v" ] || stale+=" $n ($iv → $v)"
+done
+[ -z "$stale" ] && ok "mods à jour (claude/mods)" || warn "mods en retard :$stale  → claude plugin marketplace update skayfa && claude plugin update <mod>@skayfa"
 
 section "Hammerspoon"
 if pgrep -x Hammerspoon >/dev/null; then ok "lancé (dropdown Ctrl+Alt+T, bannières Claude)"

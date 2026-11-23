@@ -13,8 +13,9 @@
 
    ▸ CLAUDE
        préfixe  a           aller au prochain Claude qui t'attend (toutes sessions)
-       préfixe  A           tableau de tous les Claude : bloqué / à toi / travaille,
-                            contexte, effort, ce qu'il fait (en direct, Entrée = y aller)
+       préfixe  A           tableau de tous les Claude : bloqué / à toi / travaille / figé,
+                            contexte, effort, avancement 3/7, ce qu'il fait
+                            (en direct, Entrée = y aller)
        préfixe  N           historique des notifications Claude (Entrée = y aller)
        bannière macOS       triée par l'IA, seulement si tu n'es pas dans Alacritty :
                               🔴 décision (avec son) · 🟡 à relire · ⚪ info (pas de bannière)

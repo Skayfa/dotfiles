@@ -5,6 +5,7 @@ import type { Entree, Jalon, Note, Pilotage, Question, Statut, Tache } from '../
 export const FILE = 'pilotage/pilotage.json'
 export const WIP_MAX = 2
 export const IDLE_DAYS = 1
+export const STALL_MS = 15 * 60_000
 
 const STATUTS: Statut[] = ['backlog', 'pret', 'en_cours', 'bloque', 'fait', 'abandonne']
 const DONE: Statut[] = ['fait', 'abandonne']
@@ -533,4 +534,25 @@ export function reviewPrompt(t: Tache, diff: string, base: string, untracked: st
     diff || '(empty diff)',
     '```',
   ].filter(x => x !== null).join('\n')
+}
+
+// --- a held task nothing works on --------------------------------------------------------------
+
+// What the session knows of its own life: is a turn or an agent running, when did anything last move, and
+// has it delegated (an agent seen running since the owner last wrote).
+export type Life = { busy: boolean; lastActivity: number; delegated: boolean }
+
+// The tasks this session holds that nothing works on any more: it had delegated to agents, none runs now,
+// and no turn has moved for STALL_MS. A session that simply waits for the owner is left alone. Each task is
+// told once until the owner writes again (`woken`), so a wake's own reply never re-arms it.
+export function stalled(p: Pilotage, holder: string, life: Life, now: number, woken: ReadonlySet<string>): Tache[] {
+  if (!holder || !life.delegated || life.busy || now - life.lastActivity < STALL_MS) return []
+  return p.taches.filter(t => t.statut === 'en_cours' && t.tenue_par === holder && !woken.has(t.id))
+}
+
+export function wakeText(ts: Tache[], minutes: number): string {
+  const ids = ts.map(t => t.id).join(', ')
+  return `${ids} ${ts.length > 1 ? 'sont en cours' : 'est en cours'} dans cette session, mais plus aucun agent ne tourne et rien n’a bougé depuis ${minutes} min. ` +
+    'Vérifie maintenant : lis le résultat de ce qui a fini, relance l’agent ou la commande qui devait tourner, puis tache_note. ' +
+    'Si tu attends le propriétaire, dis-le en une ligne ; si la tâche doit attendre, tache_suspendre.'
 }

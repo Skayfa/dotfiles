@@ -23,7 +23,16 @@ Perso : même boucle ; le contrat = l'idée qui se précise ; le grill est itér
 - Pas de commentaires qui répètent juste le nom du type/de la méthode.
 - Avant de push : lire le changeset dans **hunk** (`hd` — c'est là que Claude annote), puis stage/commit/push dans **lazygit**. Brancher depuis `main`.
 - Travail parallèle : les **sous-agents natifs** de Claude Code, dans la session courante. Un agent par sujet, chacun dans son worktree : `isolation: "worktree"` de l'outil Agent, ou le worktree qu'un mod lui donne comme dossier (dolmen-ops, seammo-ops). **Agent Teams** (in-process) seulement quand les agents doivent se parler. Pas de session à part (`ccw`, tmux) sauf demande explicite.
+- Enchaîner : quand le plan est validé (ou la demande claire) et que l'étape suivante en découle et se défait facilement, la faire sans demander « je continue ? ». Ne s'arrêter que pour l'irréversible ou ce qui sort de la machine (push, déploiement, suppression, message envoyé), pour un vrai choix qui me revient, ou quand tout est fini.
 - Backups : seulement avant une **réécriture/écrasement**, pas pour un simple ajout.
+
+## Comment m'écrire (je lis dans Claude Code, dans un pane tmux)
+
+- L'essentiel d'abord : la réponse ou la décision en une ou deux phrases, le détail ensuite.
+- Phrases courtes, mots simples. Un terme technique : l'expliquer en quelques mots la première fois.
+- Tableau seulement pour comparer, 2 à 4 colonnes, cellules de quelques mots. Sinon une liste.
+- Jamais d'art ASCII : pas de maquettes encadrées, barres, jauges ou schémas en caractères. Ils cassent dès que le pane est étroit.
+- Titres seulement pour une réponse longue ; gras pour un mot clé, pas pour des phrases entières.
 
 ## Outils
 

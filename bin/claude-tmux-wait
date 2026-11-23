@@ -4,21 +4,26 @@
 # claude-tmux-wait — tell you which Claude Code is waiting for you: tmux marker, macOS banner, history, board.
 #   on <kind>    mark the window of $TMUX_PANE, log it, send a banner
 #                kinds: done (hook Stop), permission | question | idle (hook Notification, by matcher)
+#                done first runs the stop guard, in or out of tmux: a Claude that ends its turn saying it
+#                waits for agents or tasks while none runs is sent back once to check (nothing would wake it)
 #   perm         note the pending permission (tool, command) on the pane  (hook PermissionRequest)
 #   prompt       you sent a prompt: clear the mark, the pane works   (hook UserPromptSubmit)
-#   off          clear the mark, a blocked pane works again          (hook PostToolUse)
+#   off          clear the mark, a blocked pane works again; on TaskCreate / TaskUpdate, note Claude's
+#                progress on the pane: "3/7" and the step in progress     (hook PostToolUse)
 #   end          forget the pane                                     (hook SessionEnd)
 #   next         jump to the next waiting window, any session        (tmux: prefix a)
 #   goto <id>    jump to tmux window <id>, e.g. @12                  (banner click, via Hammerspoon)
 #   history      browse past notifications, Enter jumps there        (tmux: prefix N)
 #   board        every Claude with its state, context, effort, live  (tmux: prefix A)
-#   watch        flag a Claude that loops (Hammerspoon timer, every 3 min)
+#   watch        flag a Claude that loops, or that is frozen: working, its session silent for 10 min
+#                (Hammerspoon timer, every 3 min)
 #   restore [file]  after tmux-resurrect restored the panes, start Claude again where it ran, on its last
 #                conversation (@resurrect-hook-post-restore-all)
 #   approve <pane> <command>  answer "1. Yes" to a Bash permission prompt (banner button "Autoriser"),
 #                only if the pane shows that prompt with that exact command; else jump there
 # Each Claude pane carries its state in pane options: @claude_state (work | blocked | done), @claude_since,
-# @claude_last, plus @claude_ctx, @claude_effort and @claude_tx written by the status line.
+# @claude_last, @claude_progress and @claude_doing (task list), plus @claude_ctx, @claude_effort and @claude_tx
+# written by the status line.
 # Hook modes stay silent and always exit 0: a non-zero exit could block Claude.
 
 # Hammerspoon runs us with launchd's bare PATH.
@@ -40,6 +45,57 @@ last_tool() {
   tail -n 50 "$1" 2>/dev/null | jq -rs '
     [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | last | select(. != null)
     | "\(.name) : \(.input.description // .input.command // .input.file_path // .input.url // .input.pattern // "")"' 2>/dev/null
+}
+
+# Claude's task list (TaskCreate / TaskUpdate) for this session, kept in a small file, summed up on the pane:
+# @claude_progress "3/7", @claude_doing the step in progress. Subagents' own tasks are left out.
+TASKS="${XDG_STATE_HOME:-$HOME/.local/state}/claude-tmux-wait/tasks"
+track_tasks() {
+  local payload=$1 sid f
+  [ -z "$(jq -r '.agent_id // empty' <<<"$payload")" ] || return
+  sid=$(jq -r '.session_id // empty' <<<"$payload" | tr -cd 'A-Za-z0-9-')
+  [ -n "$sid" ] || return
+  mkdir -p "$TASKS"; f="$TASKS/$sid.json"
+  [ -s "$f" ] || echo '{}' >"$f"
+  jq --argjson p "$payload" '
+    ($p.tool_input) as $i
+    | if $p.tool_name == "TaskCreate" then
+        (($p.tool_response.task.id // $p.tool_response.id // ((keys | length) + 1)) | tostring) as $id
+        | .[$id] = {status: "pending", subject: $i.subject, active: ($i.activeForm // $i.subject)}
+      else (($i.taskId // "") | tostring) as $id
+        | if has($id) then
+            .[$id] |= (.status = ($i.status // .status) | .subject = ($i.subject // .subject)
+                       | .active = ($i.activeForm // .active))
+          else . end
+      end' "$f" >"$f.tmp" 2>/dev/null && mv "$f.tmp" "$f" || { rm -f "$f.tmp"; return; }
+  read -r progress doing < <(jq -r '
+    [.[] | select(.status != "deleted")] as $t
+    | ($t | map(select(.status == "completed")) | length) as $d
+    | "\($d)/\($t | length) \([$t[] | select(.status == "in_progress") | .active] | first // "")"' "$f")
+  tmux set -p -t "$TMUX_PANE" @claude_progress "$progress" \; set -p -t "$TMUX_PANE" @claude_doing "$(printf '%s' "$doing" | flatten 80)"
+}
+
+# Stop guard. Claude says it will resume when its agents or tasks finish, but none is running: nothing will
+# ever wake it (an agent that never started, a launch that failed, a run that died). Its turn is refused
+# once, with why; stop_hook_active lets the second stop through, so it never loops.
+WAIT_CLAIM="je (te )?(reprends|reviens|relance|préviens|recontacte)( (la main|le lot|la suite|tout))?( vers vous| vers toi)? (quand|dès|une fois|lorsqu|à la fin)\
+|j.attends (que (les?|la|leurs?|mes|ils|elles)|la fin|leurs?|les (résultats|agents|sous-agents|tâches|runs)|le (retour|run|build)|la ci)\
+|(quand |dès qu|une fois qu|lorsqu)(e |.)?(ils|elles|les (agents|sous-agents|tâches|runs)|le (run|build)|la ci|mes agents)[^.]{0,25}(aur(a|ont) (fini|terminé)|ser(a|ont) (fini|terminé|vert)|reviendr|termine|finit|finissent)\
+|en attendant (leurs?|les?|la) (retour|résultat|fin)\
+|i.ll (resume|report back|check back|continue|pick (this|it) (back )?up)[^.]{0,40}(when|once|after)\
+|waiting (for|on) (the )?(agents?|subagents?|tasks?|runs?|build|ci|results?)"
+STOP_REASON="Tu termines ton tour en disant que tu attends des agents ou des tâches, mais aucune tâche de fond ne tourne dans cette session : rien ne te réveillera. Vérifie maintenant : lis le résultat de ce qui a déjà fini et relance ce qui devait tourner. Si c'est un mod ou un service extérieur qui te réveillera, dis-le en une ligne. Sinon, dis clairement à l'utilisateur que tu es à l'arrêt et ce qu'il doit faire."
+stop_guard() {
+  local p=$1 running tail_msg
+  [ "$(jq -r '.stop_hook_active // false' <<<"$p" 2>/dev/null)" = true ] && return 1
+  # Anything that will wake it: background work in flight, or a wake-up it scheduled (cron, /loop).
+  # background_tasks lists only work in flight, whatever its status word.
+  running=$(jq '(.background_tasks // []) + (.session_crons // []) | length' <<<"$p" 2>/dev/null)
+  [ "${running:-1}" -eq 0 ] 2>/dev/null || return 1
+  # The claim sits at the end of the message: the last 600 characters, on one line.
+  tail_msg=$(jq -r '.last_assistant_message // ""' <<<"$p" 2>/dev/null | tr '\n' ' ' | tail -c 600)
+  grep -qiE "$(tr -d '\n' <<<"$WAIT_CLAIM")" <<<"$tail_msg" || return 1
+  jq -n --arg r "$STOP_REASON" '{decision: "block", reason: $r}'
 }
 
 # ── AI (Haiku through `claude -p`), always in the background, never blocking Claude ─────────────────────
@@ -128,8 +184,28 @@ risk() {
 watch() {
   local f=$'\x1f' now acts rep errs r
   now=$(date +%s)
-  tmux list-panes -a -F "#{pane_id}$f#{window_id}$f#{session_name}$f#{window_name}$f#{@claude_state}$f#{@claude_since}$f#{@claude_tx}$f#{@claude_loop_for}$f#{@claude_loop_checked}" |
-  while IFS=$f read -r pane win session name state since tx loopfor checked; do
+  tmux list-panes -a -F "#{pane_id}$f#{window_id}$f#{session_name}$f#{window_name}$f#{@claude_state}$f#{@claude_since}$f#{@claude_tx}$f#{@claude_loop_for}$f#{@claude_loop_checked}$f#{@claude_stall_for}" |
+  while IFS=$f read -r pane win session name state since tx loopfor checked stallfor; do
+    # Frozen: working, but its session has not moved for 10 min. A tool still running (its call has no
+    # result yet) is a long command, flagged at 30 min; otherwise Claude itself is stuck. Once per silence.
+    if [ "$state" = work ] && [ -f "$tx" ]; then
+      mt=$(stat -f %m "$tx" 2>/dev/null || echo "$now")
+      if [ $((now - mt)) -ge 600 ] && [ "$stallfor" != "$mt" ]; then
+        pending=$(tail -n 30 "$tx" 2>/dev/null | jq -rs '
+          [.[] | .message.content? | arrays | .[] | objects] as $c
+          | ([$c[] | select(.type == "tool_result") | .tool_use_id]) as $done
+          | [$c[] | select(.type == "tool_use") | select(.id as $i | $done | index($i) | not)] | last | select(. != null)
+          | "\(.name) : \(.input.command // .input.description // .input.file_path // "")"' 2>/dev/null | flatten 100)
+        mins=$(( (now - mt) / 60 ))
+        if [ -z "$pending" ]; then
+          tmux set -p -t "$pane" @claude_stall_for "$mt" \; set -p -t "$pane" @claude_stall "figé depuis $mins min, sans outil en cours"
+          notify "$win" "$session" "$name" stall "⏸ $name semble figé" "plus rien depuis $mins min, aucun outil en cours" 1
+        elif [ $((now - mt)) -ge 1800 ]; then
+          tmux set -p -t "$pane" @claude_stall_for "$mt" \; set -p -t "$pane" @claude_stall "commande longue ($mins min) : $pending"
+          notify "$win" "$session" "$name" stall "⏳ $name : une commande tourne depuis $mins min" "$pending" 0
+        fi
+      fi
+    fi
     [ "$state" = work ] && [ -n "$since" ] && [ $((now - since)) -ge 600 ] && [ "$loopfor" != "$since" ] || continue
     [ -n "$checked" ] && [ $((now - checked)) -lt 600 ] && continue      # a "no" holds 10 min
     acts=$(tail -n 400 "$tx" 2>/dev/null | jq -cs '
@@ -152,8 +228,7 @@ Erreurs sur les 15 derniers résultats : $errs")
 
 mark_on() {
   kind=$1
-  payload=""
-  [ -t 0 ] || payload=$(cat)
+  payload=${PAYLOAD:-}
   field() { printf '%s' "$payload" | jq -r "$1" 2>/dev/null; }
 
   tmux set -w -t "$TMUX_PANE" @claude_wait 1
@@ -239,8 +314,8 @@ board_lines() {
   c_re=$'\033[38;2;230;126;128m' c_fg=$'\033[38;2;211;198;170m' r=$'\033[0m'
   # Fields split on \x1f, not tab: read merges consecutive tabs, which shifts empty fields.
   local f=$'\x1f'
-  tmux list-panes -a -F "#{pane_id}$f#{window_id}$f#{session_name}$f#{window_name}$f#{pane_current_command}$f#{@claude_state}$f#{@claude_since}$f#{@claude_ctx}$f#{@claude_effort}$f#{@claude_tx}$f#{@claude_class}$f#{@claude_loop_for}$f#{@claude_loop}$f#{@claude_last}" |
-  while IFS=$f read -r pane win session name cmd state since ctx effort tx class loopfor loop last; do
+  tmux list-panes -a -F "#{pane_id}$f#{window_id}$f#{session_name}$f#{window_name}$f#{pane_current_command}$f#{@claude_state}$f#{@claude_since}$f#{@claude_ctx}$f#{@claude_effort}$f#{@claude_tx}$f#{@claude_class}$f#{@claude_loop_for}$f#{@claude_loop}$f#{@claude_stall_for}$f#{@claude_stall}$f#{@claude_progress}$f#{@claude_doing}$f#{@claude_last}" |
+  while IFS=$f read -r pane win session name cmd state since ctx effort tx class loopfor loop stallfor stall progress doing last; do
     [ -n "$state$ctx" ] || continue
     case $cmd in zsh|bash|sh|fish|-zsh|login) continue ;; esac   # Claude has exited, the shell is back
     case $state in
@@ -253,7 +328,10 @@ board_lines() {
           *)        key=2 label="${c_ye}● à toi   " ;;
         esac ;;
       work)    key=3 label="${c_bl}⟳ travaille"; t=$(last_tool "$tx" | flatten 120); [ -n "$t" ] && last=$t
-               [ -n "$loopfor" ] && [ "$loopfor" = "$since" ] && key=1 label="${c_re}⚠ boucle  " last=$loop ;;
+               [ -n "$doing" ] && last="$doing${last:+ · $last}"
+               [ -n "$loopfor" ] && [ "$loopfor" = "$since" ] && key=1 label="${c_re}⚠ boucle  " last=$loop
+               [ -n "$stallfor" ] && [ -n "$tx" ] && [ "$(stat -f %m "$tx" 2>/dev/null)" = "$stallfor" ] \
+                 && { case $stall in commande*) label="${c_ye}⏳ longue  " ;; *) key=1 label="${c_re}⏸ figé    " ;; esac; last=$stall; } ;;
       *)       key=4 label="${c_gr}· inactif " ;;
     esac
     ago=""
@@ -269,9 +347,9 @@ board_lines() {
       for ((i = 0; i < 8; i++)); do [ "$i" -eq "$full" ] && gauge+=$c_gr; [ "$i" -lt "$full" ] && gauge+="▰" || gauge+="▱"; done
       gauge+=$(printf ' %s%3s%%' "$gc" "$ctx")
     fi
-    printf '%s\t%s\t%s %s%-14.14s%s %s%-10.10s%s %s%-7s%s %s %s%-6s%s %s%s%s\n' \
+    printf '%s\t%s\t%s %s%-14.14s%s %s%-10.10s%s %s%-7s%s %s %s%-6s%s %s%-5s%s %s%s%s\n' \
       "$win" "$key" "$label$r" "$c_fg" "$name" "$r" "$c_gr" "$session" "$r" "$c_gr" "$ago" "$r" \
-      "$gauge$r" "$c_pu" "$effort" "$r" "$c_gr" "$last" "$r"
+      "$gauge$r" "$c_pu" "$effort" "$r" "$c_aq" "$progress" "$r" "$c_gr" "$last" "$r"
   done | sort -t $'\t' -k2,2n
 }
 
@@ -345,6 +423,16 @@ goto() {
 
 case "${1:-}" in
   on)
+    PAYLOAD=""
+    [ -t 0 ] || PAYLOAD=$(cat)
+    if [ "${2:-done}" = done ] && stop_guard "$PAYLOAD"; then
+      # Sent back to work: not done. Logged, no banner.
+      if [ -n "${TMUX_PANE:-}" ]; then
+        { IFS=$'\t' read -r w s n < <(tmux display -p -t "$TMUX_PANE" '#{window_id}	#{session_name}	#{window_name}')
+          notify "$w" "$s" "$n" guard "" "renvoyé au travail : attendait des tâches qui ne tournent pas" -; } >/dev/null 2>&1
+      fi
+      exit 0
+    fi
     [ -n "${TMUX_PANE:-}" ] && mark_on "${2:-done}" >/dev/null 2>&1
     exit 0 ;;
   perm)
@@ -378,13 +466,17 @@ case "${1:-}" in
         tmux set -w -u -t "$TMUX_PANE" @claude_wait
         [ "$(tmux display -p -t "$TMUX_PANE" '#{@claude_state}')" = blocked ] && pstate work ""
         tmux refresh-client -S
+        if [ ! -t 0 ]; then
+          payload=$(cat)
+          case $(jq -r '.tool_name // ""' <<<"$payload") in TaskCreate|TaskUpdate) track_tasks "$payload" ;; esac
+        fi
       } >/dev/null 2>&1
     fi
     exit 0 ;;
   end)
     if [ -n "${TMUX_PANE:-}" ]; then
       { tmux set -w -u -t "$TMUX_PANE" @claude_wait
-        for o in state since last class ctx effort tx perm_tool perm_cmd perm_text perm_level perm_why perm_for loop loop_for loop_checked; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
+        for o in state since last class progress doing stall stall_for ctx effort tx perm_tool perm_cmd perm_text perm_level perm_why perm_for loop loop_for loop_checked; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
         tmux refresh-client -S; } >/dev/null 2>&1
     fi
     exit 0 ;;

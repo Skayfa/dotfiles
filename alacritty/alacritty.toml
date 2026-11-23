@@ -11,6 +11,9 @@ option_as_alt = "Both"
 
 [font]
 size = 14.0
+# A little line spacing: table rows and list items stay apart.
+offset = { x = 0, y = 3 }
+glyph_offset = { x = 0, y = 1 }
 normal = { family = "JetBrainsMono Nerd Font Mono", style = "Regular" }
 bold = { family = "JetBrainsMono Nerd Font Mono", style = "Bold" }
 italic = { family = "JetBrainsMono Nerd Font Mono", style = "Italic" }

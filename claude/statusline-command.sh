@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Claude Code status line: folder (+ * when the git tree is dirty), model and effort, context gauge.
+# Claude Code status line: folder (+ * when the git tree is dirty), model and effort, context gauge,
+# task progress (3/7 · step in progress).
 # Time and branch are left to the tmux bar right below. Colours: Everforest, as tmux and Alacritty.
 
 input=$(cat)
@@ -35,6 +36,15 @@ if [ -n "$used" ]; then
     if [ "$i" -lt "$full" ]; then bar+="▰"; else bar+="▱"; fi
   done
   out+="   ${bar} ${c}${pct}%${RESET}"
+fi
+
+# Claude's task list, noted on the pane by claude-tmux-wait: "3/7 · step in progress".
+if [ -n "${TMUX_PANE:-}" ]; then
+  IFS=$'\x1f' read -r progress doing < <(tmux display -p -t "$TMUX_PANE" $'#{@claude_progress}\x1f#{@claude_doing}' 2>/dev/null)
+  if [ -n "$progress" ] && [ "${progress#*/}" != 0 ]; then
+    if [ "${progress%/*}" = "${progress#*/}" ]; then out+="   ${GREEN}✓ ${progress}${RESET}"
+    else out+="   ${AQUA}${progress}${RESET}"; [ -n "$doing" ] && out+=" ${GREY}· ${doing:0:50}${RESET}"; fi
+  fi
 fi
 
 # Hand context, effort and transcript to the tmux pane, for the Claude board (bin/claude-tmux-wait, prefix A).

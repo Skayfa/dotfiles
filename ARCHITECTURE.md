@@ -61,7 +61,7 @@ flowchart TD
 | préfixe `e`                    | tmux → `zed`                         | ouvre le projet du pane dans **Zed**                            |
 | préfixe `S` / `Tab`            | tmux popup / tmux 3.8                | changer de session / chercher fenêtre ou session                |
 | préfixe `a`                    | tmux → `claude-tmux-wait next`       | aller au prochain **Claude qui t'attend** (toutes sessions)     |
-| préfixe `A`                    | tmux popup → `claude-tmux-wait board`| **tableau de tous les Claude** (état, contexte, effort), en direct |
+| préfixe `A`                    | tmux popup → `claude-tmux-wait board`| **tableau de tous les Claude** (état, contexte, effort, avancement), en direct |
 | préfixe `N`                    | tmux popup → `claude-tmux-wait history` | historique des notifications Claude                          |
 | clic / « Autoriser » sur une bannière | Hammerspoon → `claude-tmux-wait goto/approve` | aller à la fenêtre / valider une permission Bash courte |
 | `⌥ ←/→/↑/↓`                    | tmux (sans préfixe)                  | pane voisin s'il existe, sinon la touche passe (⌥←/→ = mot)    |
@@ -164,7 +164,7 @@ Plusieurs Claude tournent en parallèle dans tmux. Un seul script, [`bin/claude-
 flowchart LR
     subgraph cc["Claude Code (un par pane tmux)"]
         H["hooks<br/>Stop · Notification · PermissionRequest<br/>UserPromptSubmit · PostToolUse · SessionEnd"]
-        SL["statusline<br/>contexte · effort · transcript"]
+        SL["statusline<br/>contexte · effort · avancement"]
     end
     W["bin/claude-tmux-wait"]
     H --> W
@@ -179,6 +179,7 @@ flowchart LR
     HS -- "Autoriser → approve<br/>(vérifie l'écran)" --> H
 ```
 
+- **Avancement** (`PostToolUse` sur `TaskCreate` / `TaskUpdate`) → la liste de tâches de Claude résumée sur le pane : « 3/7 · étape en cours » dans sa barre d'état et dans le tableau. Plus besoin de demander « ça avance ? ».
 - **Fini** (`Stop`) ou **bloqué** (permission, question) → ● sur l'onglet, ligne d'historique, bannière (son seulement quand bloqué, aucune si Alacritty est devant).
 - **Tu réponds** (`UserPromptSubmit`) ou il reprend (`PostToolUse`) → le ● s'éteint ; **il quitte** (`SessionEnd`) → le pane est oublié.
 - La **commande** d'une permission vient de `PermissionRequest` (la transcription ne l'a pas encore) ; le bouton « Autoriser » ne tape `1` que si le pane montre encore cette demande pour cette commande exacte.
@@ -186,6 +187,8 @@ flowchart LR
   - fin de tâche → 🔴 *décision* (bannière + son), 🟡 *à relire* (bannière muette), ⚪ *info* (pas de bannière), avec un résumé d'une phrase repris dans le tableau et l'historique ;
   - permission → ce que fait vraiment l'action et son risque (✓ / ⚠ / ⛔) ; ⛔ retire le bouton « Autoriser » ;
   - toutes les 3 min (minuterie Hammerspoon, `claude-tmux-wait watch`) → un Claude qui travaille depuis 10 min et répète la même commande ou la même erreur est signalé « ⚠ boucle ».
+  - même minuterie → un Claude « en travail » dont la session n'a plus bougé depuis 10 min est signalé « ⏸ figé » (aucun outil en cours) ou « ⏳ longue » (une commande tourne depuis 30 min).
+- **Jamais d'attente dans le vide** : à la fin d'un tour (`Stop`, dans ou hors tmux), si Claude dit « je reprends quand… » alors qu'aucune tâche de fond ne tourne et qu'aucun réveil n'est programmé, la fin de tour est refusée une fois : il doit vérifier et relancer ce qui manque. Côté projets, le mod `pilote` réveille une session qui tient une tâche en cours sans que rien ne tourne depuis 15 min.
   Si l'appel échoue, on retombe sur la bannière simple.
 - **Après un redémarrage**, tmux-resurrect restaure les panes puis appelle `claude-tmux-wait restore` : chaque Claude repart avec ses options, sur la dernière conversation de son dossier (`--continue`).
 - `bin/dotfiles-doctor` vérifie toute la chaîne.
