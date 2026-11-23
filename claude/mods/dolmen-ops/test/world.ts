@@ -15,6 +15,8 @@ export type World = {
   cwd?: string
   env?: Record<string, string>
   store?: Record<string, unknown>
+  // The store read and written in `store` itself, so a test can write it as another session of the Mac would.
+  liveStore?: boolean
   agents?: { id: string; status: 'idle' | 'running' | 'waiting' | 'completed' | 'pending' }[]
   dirs?: Record<string, string[]>
   files?: Record<string, string>
@@ -32,7 +34,14 @@ export function world(on: On, w: World = {}) {
   const prompts = (w.prompts ??= [])
   const files = (w.files ??= { [`${ROOT}/cmd/dolmen/main.go`]: 'package main' })
   mock.env(on, { HOME: '/w', TMPDIR: '/tmp', DOLMEN_OPS_CACHE: `/w/.cache/dolmen-ops-${++worlds}`, ...w.env })
-  mock.store(on, w.store)
+  if (w.liveStore) {
+    const store = (w.store ??= {})
+    on('store.get', (_, e) => ({ value: store[e.key] }))
+    on('store.set', (_, e) => {
+      store[e.key] = e.value
+      return { value: undefined }
+    })
+  } else mock.store(on, w.store)
   const clock = mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd ?? ROOT }))

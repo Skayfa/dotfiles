@@ -398,6 +398,9 @@ const AGENT_STATE: Record<string, string> = { pending: 'démarre', running: 'tra
 const stoppedAt = new Map<string, number>()
 // The lots stalled at the last pass, with since when: the pane's rows say it.
 let stalledLots = new Map<string, number>()
+// The stops this session already told. The store is shared by every session of the Mac, and another
+// session, which does not see this session's agents, may write it without them: told here stays told.
+const toldHere = new Set<string>()
 
 // The working folders of the processes running on this machine (lsof). Unknown: none.
 async function busyDirs($: EngineInterface): Promise<string[]> {
@@ -451,7 +454,9 @@ async function watchStalled($: EngineInterface): Promise<void> {
     found.set(lot.name, from)
     const key = `${a.id}@${since}`
     keys.push(key)
-    if (!told.includes(key)) fresh.push({ name: lot.name, state: AGENT_STATE[a.status] ?? a.status, minutes: Math.round((t - from) / 60_000) })
+    if (told.includes(key) || toldHere.has(key)) continue
+    toldHere.add(key)
+    fresh.push({ name: lot.name, state: AGENT_STATE[a.status] ?? a.status, minutes: Math.round((t - from) / 60_000) })
   }
   stalledLots = found
   if (fresh.length) {
@@ -459,7 +464,10 @@ async function watchStalled($: EngineInterface): Promise<void> {
     void $.ui.notify(`${fresh.map(l => l.name).join(', ')} : agent arrêté, rien ne bouge depuis ${fresh[0]!.minutes} min`, { title: TITLE })
   }
   // Only the stops still going on are kept: an agent that works again and stops later is told again.
-  if (fresh.length || keys.length !== told.length) await $.store.set('stalledTold', keys)
+  // A session drops only the stops of the agents it sees: the others belong to another session.
+  for (const key of toldHere) if (!keys.includes(key)) toldHere.delete(key)
+  const next = [...told.filter(k => !list.some(a => k.startsWith(`${a.id}@`))), ...keys]
+  if (next.length !== told.length || next.some(k => !told.includes(k))) await $.store.set('stalledTold', next)
 }
 
 // Each lot with its agent, its branch, its MR and how long since it moved (its MR, else its last

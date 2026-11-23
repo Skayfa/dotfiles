@@ -206,9 +206,11 @@ test('outside Dolmen, another mod’s /panneau goes past this mod', async ($, on
 // The Lead with lot ET-4449+ET-4481 and its agent ag-1, whose worktree last committed an hour ago.
 function stalledWorld(on: On, o: { status?: 'idle' | 'running' | 'waiting'; busy?: boolean } = {}) {
   const base = withBranch(dolmen({}))
-  return world(on, {
+  const store: Record<string, unknown> = { lotAgents: { 'ET-4449-ET-4481-competences': 'ag-1' } }
+  const w = world(on, {
     agents: [{ id: 'ag-1', status: o.status ?? 'waiting' }],
-    store: { lotAgents: { 'ET-4449-ET-4481-competences': 'ag-1' } },
+    store,
+    liveStore: true,
     dirs: { [HOME]: ['ET-4449-ET-4481-competences'] },
     answer: (argv, body) =>
       argv[0] === 'lsof' ? { stdout: o.busy ? `p4242\nn${LOT}\np1\nn/` : 'p1\nn/' }
@@ -216,6 +218,7 @@ function stalledWorld(on: On, o: { status?: 'idle' | 'running' | 'waiting'; busy
       : argv.includes('--format=%ct') ? { stdout: String(Math.floor((NOW - 3_600_000) / 1000)) }
       : base(argv, body),
   })
+  return { ...w, store }
 }
 const told = (prompts: string[]) => prompts.filter(p => p.includes('dolmen-ops : un agent de lot est arrêté'))
 
@@ -238,6 +241,21 @@ test('a lot agent stopped 15 min with nothing moving in its worktree is told to 
   await clock.advance(10)
   await clock.settle()
   expect((await $.command.run({ command: 'etat', args: '', ...TYPED })).text).toContain('arrêté, rien ne bouge depuis')
+})
+
+// The store is shared by every session of the Mac: another one, which does not see this agent, writes it empty.
+test('a stop told once stays told when another session empties the shared store', async ($, on) => {
+  const { prompts, clock, store } = stalledWorld(on, { status: 'idle' })
+  await $.session.start(START)
+  await clock.advance(18 * 60_000 + 10)
+  await clock.settle()
+  expect(told(prompts)).toHaveLength(1)
+  for (let i = 0; i < 5; i++) {
+    store.stalledTold = []
+    await clock.advance(2 * 60_000)
+    await clock.settle()
+  }
+  expect(told(prompts)).toHaveLength(1)
 })
 
 test('an agent whose worktree has a process running, or that works, is not told', async ($, on) => {
