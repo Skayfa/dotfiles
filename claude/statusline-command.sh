@@ -1,52 +1,37 @@
-#!/bin/sh
-# Claude Code status line — mirrors Starship config (time | dir | git | model | context)
+#!/usr/bin/env bash
+# Claude Code status line: folder (+ * when the git tree is dirty), model, context gauge.
+# Time and branch are left to the tmux bar right below. Colours: Everforest, as tmux and Alacritty.
 
 input=$(cat)
+model=$(jq -r '.model.display_name // empty' <<<"$input" 2>/dev/null)
+cwd=$(jq -r '.workspace.current_dir // .cwd // empty' <<<"$input" 2>/dev/null)
+used=$(jq -r '.context_window.used_percentage // empty' <<<"$input" 2>/dev/null)
 
-# ── Claude context ────────────────────────────────────────────────────────────
-model=$(echo "$input" | jq -r '.model.display_name // empty')
-cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
-used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+rgb() { printf '\033[38;2;%d;%d;%dm' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }
+RESET=$'\033[0m'
+BLUE=$(rgb 7fbbb3) ORANGE=$(rgb e69875) AQUA=$(rgb 83c092) GREY=$(rgb 859289)
+GREEN=$(rgb a7c080) YELLOW=$(rgb dbbc7f) RED=$(rgb e67e80)
 
-# ── Time ──────────────────────────────────────────────────────────────────────
-time_str=$(date +%H:%M)
+cwd=${cwd:-$PWD}
+dir=${cwd/#$HOME/\~}
+dirty=""
+[ -n "$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null | head -1)" ] && dirty=" ${ORANGE}*"
 
-# ── Directory ─────────────────────────────────────────────────────────────────
-if [ -n "$cwd" ]; then
-  dir=$(basename "$cwd")
-  parent=$(dirname "$cwd" | sed "s|$HOME|~|")
-  [ "$parent" = "." ] && dir_str="$dir" || dir_str="$parent/$dir"
-  dir_str=$(echo "$dir_str" | sed "s|^$HOME|~|")
-else
-  dir_str=$(basename "$(pwd)")
+out="${BLUE} ${dir}${dirty}${RESET}"
+[ -n "$model" ] && out+="   ${AQUA}${model}${RESET}"
+
+# Context gauge: 8 cells, green under 50 %, yellow under 80 %, red beyond (time to /compact).
+if [ -n "$used" ]; then
+  pct=$(printf '%.0f' "$used" 2>/dev/null) || pct=0
+  if [ "$pct" -ge 80 ]; then c=$RED; elif [ "$pct" -ge 50 ]; then c=$YELLOW; else c=$GREEN; fi
+  full=$(( (pct * 8 + 50) / 100 ))
+  [ "$full" -gt 8 ] && full=8
+  bar=$c
+  for ((i = 0; i < 8; i++)); do
+    [ "$i" -eq "$full" ] && bar+=$GREY
+    if [ "$i" -lt "$full" ]; then bar+="▰"; else bar+="▱"; fi
+  done
+  out+="   ${bar} ${c}${pct}%${RESET}"
 fi
 
-# ── Git ───────────────────────────────────────────────────────────────────────
-git_info=""
-if git -C "${cwd:-$(pwd)}" rev-parse --git-dir > /dev/null 2>&1; then
-  branch=$(git -C "${cwd:-$(pwd)}" symbolic-ref --short HEAD 2>/dev/null \
-           || git -C "${cwd:-$(pwd)}" rev-parse --short HEAD 2>/dev/null)
-  # status flags (no lock acquisition needed for status)
-  status_flags=""
-  git_status=$(git -C "${cwd:-$(pwd)}" --no-optional-locks status --porcelain 2>/dev/null)
-  [ -n "$git_status" ] && status_flags="*"
-  added=$(echo "$git_status" | grep -c "^[MADRC]" 2>/dev/null)
-  [ "${added:-0}" -gt 0 ] && status_flags="${status_flags}+${added}"
-  git_info=" on  ${branch}${status_flags:+ $status_flags}"
-fi
-
-# ── Context window ────────────────────────────────────────────────────────────
-ctx_str=""
-if [ -n "$used_pct" ]; then
-  # Round to integer
-  used_int=$(printf "%.0f" "$used_pct" 2>/dev/null || echo "$used_pct")
-  ctx_str=" | ctx ${used_int}%"
-fi
-
-# ── Model ─────────────────────────────────────────────────────────────────────
-model_str=""
-[ -n "$model" ] && model_str=" | $model"
-
-# ── Assemble ──────────────────────────────────────────────────────────────────
-printf "\033[32m %s\033[0m  \033[34m ﱮ %s\033[0m\033[33m%s\033[0m\033[36m%s%s\033[0m" \
-  "$time_str" "$dir_str" "$git_info" "$model_str" "$ctx_str"
+printf '%s' "$out"
