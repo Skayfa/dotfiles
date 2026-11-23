@@ -57,8 +57,8 @@
        préfixe  h           hunk — review du diff courant, NON commité (popup)
        préfixe  b           hunk — choisir un commit dans l'historique et le
                             relire (Échap sort, quitter hunk revient à la liste)
-       préfixe  e           nvim — éditeur du projet courant (fenêtre dédiée,
-                            y saute si elle existe déjà)
+       préfixe  e           Zed — ouvre le projet courant (l'IDE : lire, naviguer)
+                            ⌘P fichier · ⌘⇧F chercher · ⌘clic définition
        préfixe  D           lazysql — bases de données (popup)
        préfixe  [           mode défilement/copie   (q pour sortir)
        préfixe  r           recharger cette config

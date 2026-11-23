@@ -90,7 +90,7 @@ Tout est dans [`zsh/plugins.zsh`](zsh/plugins.zsh), sourcé **en dernier** par `
 
 ```mermaid
 flowchart TD
-    NV["Neovim · NvChad 2.5<br/>thème catppuccin-latte"]
+    NV["Neovim · NvChad 2.5<br/>thème everforest"]
     NV --> LSP["LSP (vim.lsp.enable)<br/>gopls · ts_ls · rust_analyzer · jsonls · yamlls · marksman · buf_ls (proto)"]
     NV --> FMT["Formatters (conform)<br/>goimports/gofmt · prettierd · rustfmt · buf"]
     NV --> TS["treesitter<br/>(CLI tree-sitter via npm)"]

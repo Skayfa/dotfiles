@@ -114,6 +114,7 @@ link_file "$DOTFILES/tmux/tmux.conf"              "$HOME/.tmux.conf"
 link_file "$DOTFILES/tmux/cheatsheet.txt"         "$HOME/.config/tmux/cheatsheet.txt"
 link_file "$DOTFILES/hammerspoon/init.lua"        "$HOME/.hammerspoon/init.lua"
 link_file "$DOTFILES/hunk/config.toml"            "$HOME/.config/hunk/config.toml"
+link_file "$DOTFILES/fzf/fzfrc"                   "$HOME/.config/fzf/fzfrc"
 # config git générique (alias hdiff/hshow) : ~/.gitconfig garde l'identité, jamais touché
 link_file "$DOTFILES/git/config"                  "$HOME/.config/git/config"
 link_file "$DOTFILES/claude/statusline-command.sh" "$HOME/.claude/statusline-command.sh"

@@ -1,0 +1,7 @@
+# fzf defaults (FZF_DEFAULT_OPTS_FILE, set by zsh/plugins.zsh and by tmux for its popups).
+# Colours: Everforest, as Alacritty, tmux and the prompt.
+--height 45%
+--layout=reverse
+--border
+--color=fg:#d3c6aa,bg:-1,hl:#a7c080,fg+:#d3c6aa,bg+:#3d484d,hl+:#a7c080,gutter:-1
+--color=border:#475258,header:#859289,info:#dbbc7f,prompt:#a7c080,pointer:#e69875,marker:#e69875,spinner:#e69875,label:#a7c080

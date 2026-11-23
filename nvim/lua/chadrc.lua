@@ -6,7 +6,9 @@
 local M = {}
 
 M.base46 = {
-	theme = "catppuccin-latte",
+	theme = "everforest", -- same palette as Alacritty, tmux, hunk, lazygit
+	-- Terminal background (#2d353b, darker in inactive tmux panes) instead of base46's own #2b3339
+	transparency = true,
 
 	-- hl_override = {
 	-- 	Comment = { italic = true },

@@ -1,11 +1,11 @@
 # hunk — diff viewer orienté review (posé par install.sh dans ~/.config/hunk/)
 # Un ~/.hunk/config.toml dans un repo surcharge ce fichier au cas par cas.
 
-# Thème clair (le terminal reste en Everforest Dark : hunk peint son propre fond).
+# Everforest Dark, comme Alacritty, tmux, nvim et lazygit (hunk peint son propre fond).
 # ATTENTION : un id de thème inconnu n'est PAS rejeté — hunk retombe silencieusement
 # sur un thème sombre. Si le fond redevient sombre, c'est une coquille ici.
 # `t` dans le TUI ouvre le sélecteur pour essayer autre chose.
-theme = "github-light-default"
+theme = "everforest-dark"
 
 # split / stack selon la largeur du terminal (utile en pane tmux étroit)
 mode = "auto"

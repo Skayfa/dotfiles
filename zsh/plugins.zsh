@@ -50,7 +50,9 @@ if command -v fzf >/dev/null 2>&1; then
     export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
     export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
   fi
-  export FZF_DEFAULT_OPTS='--height 45% --layout=reverse --border'
+  # Layout + Everforest colours live in fzf/fzfrc, shared with the tmux popups
+  export FZF_DEFAULT_OPTS_FILE="$HOME/.config/fzf/fzfrc"
+  unset FZF_DEFAULT_OPTS
   [[ -f "$HOME/.fzf.zsh" ]] || source <(fzf --zsh)   # bindings: prefer ~/.fzf.zsh, else builtin
 fi
 

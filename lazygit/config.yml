@@ -1,12 +1,7 @@
-# lazygit — palette GitHub, accordée à hunk (theme = github-light-default).
-#
-# Pourquoi PAS les couleurs de GitHub Light ici : lazygit ne peint pas son fond,
-# il hérite de celui du terminal (Everforest Dark #2d353b). Sur ce fond, les
-# couleurs de GitHub Light plafonnent à ~2.4 de contraste (illisible, cf. le bug
-# "noir sur noir" corrigé en 8bb4e93), et son fond de sélection #ddf4ff tombe à
-# 1.49 avec le texte clair. On garde donc la MÊME palette de marque, mais ses
-# variantes sombres : ~4.9 de contraste. defaultFgColor reste `default` = le
-# texte du terminal, jamais une couleur en dur.
+# lazygit — palette Everforest Dark, comme Alacritty, tmux, nvim, hunk et fzf.
+# lazygit ne peint pas son fond : il hérite de celui du terminal (#2d353b). Les couleurs
+# ci-dessous sont celles d'Everforest pensées pour ce fond. defaultFgColor reste `default`
+# = le texte du terminal, jamais une couleur en dur (cf. le bug "noir sur noir", 8bb4e93).
 gui:
   border: rounded
   showFileTree: true
@@ -14,27 +9,27 @@ gui:
   nerdFontsVersion: "3"        # icônes Nerd Font
   theme:
     activeBorderColor:
-      - "#58a6ff"             # panneau ACTIF : bleu GitHub
+      - "#a7c080"             # panneau ACTIF : vert Everforest
       - bold
     inactiveBorderColor:
-      - "#8b949e"             # panneaux inactifs : gris discret (contraste volontairement bas)
+      - "#859289"             # panneaux inactifs : gris discret
     searchingActiveBorderColor:
-      - "#58a6ff"
+      - "#dbbc7f"             # recherche en cours : jaune
       - bold
     optionsTextColor:
-      - "#58a6ff"             # barre d'aide en bas
+      - "#7fbbb3"             # barre d'aide en bas : bleu
     selectedLineBgColor:
-      - "#0a3069"             # ligne sélectionnée : bleu GitHub profond (texte lisible dessus)
+      - "#3d484d"             # ligne sélectionnée : gris-vert, texte lisible dessus
     selectedRangeBgColor:
-      - "#0a3069"
+      - "#3d484d"
     cherryPickedCommitFgColor:
-      - "#58a6ff"
+      - "#7fbbb3"
     cherryPickedCommitBgColor:
-      - "#30363d"
+      - "#475258"
     markedBaseCommitFgColor:
-      - "#d29922"             # jaune GitHub
+      - "#dbbc7f"
     unstagedChangesColor:
-      - "#ff7b72"             # changements non-stagés : rouge GitHub
+      - "#e67e80"             # changements non-stagés : rouge Everforest
     defaultFgColor:
       - default
 
