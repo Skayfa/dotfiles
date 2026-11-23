@@ -13,6 +13,8 @@
 
    ▸ CLAUDE
        préfixe  a           aller au prochain Claude qui t'attend (toutes sessions)
+       préfixe  A           tableau de tous les Claude : bloqué / à toi / travaille,
+                            contexte, effort, ce qu'il fait (en direct, Entrée = y aller)
        préfixe  N           historique des notifications Claude (Entrée = y aller)
        bannière macOS       quand un Claude finit (silencieuse) ou te bloque (avec son),
                             seulement si tu n'es pas dans Alacritty — clic = y aller

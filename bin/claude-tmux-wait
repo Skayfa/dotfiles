@@ -1,19 +1,38 @@
 #!/usr/bin/env bash
-# claude-tmux-wait — tell you which Claude Code is waiting for you: tmux marker, macOS banner, history.
-#   on <kind>  mark the window of $TMUX_PANE, log it, send a banner
-#              kinds: done (hook Stop), permission | question | idle (hook Notification, by matcher)
-#   off        clear the mark (hooks: UserPromptSubmit, PostToolUse, SessionEnd)
-#   next       jump to the next waiting window, any session (tmux: prefix a)
-#   goto <id>  jump to tmux window <id>, e.g. @12 (banner click, via Hammerspoon)
-#   history    browse past notifications, Enter jumps there (tmux: prefix N)
+# claude-tmux-wait — tell you which Claude Code is waiting for you: tmux marker, macOS banner, history, board.
+#   on <kind>    mark the window of $TMUX_PANE, log it, send a banner
+#                kinds: done (hook Stop), permission | question | idle (hook Notification, by matcher)
+#   prompt       you sent a prompt: clear the mark, the pane works   (hook UserPromptSubmit)
+#   off          clear the mark, a blocked pane works again          (hook PostToolUse)
+#   end          forget the pane                                     (hook SessionEnd)
+#   next         jump to the next waiting window, any session        (tmux: prefix a)
+#   goto <id>    jump to tmux window <id>, e.g. @12                  (banner click, via Hammerspoon)
+#   history      browse past notifications, Enter jumps there        (tmux: prefix N)
+#   board        every Claude with its state, context, effort, live  (tmux: prefix A)
+# Each Claude pane carries its state in pane options: @claude_state (work | blocked | done), @claude_since,
+# @claude_last, plus @claude_ctx, @claude_effort and @claude_tx written by the status line.
 # Hook modes stay silent and always exit 0: a non-zero exit could block Claude.
 
 # Hammerspoon runs us with launchd's bare PATH.
 PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 LOG="${XDG_STATE_HOME:-$HOME/.local/state}/claude-tmux-wait/history.tsv"
+SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 
-# One line, no tabs, at most $2 chars.
-flatten() { tr '\n\t\r' '   ' | tr -s ' ' | sed 's/^ //' | cut -c "1-$1"; }
+# One line, no tabs, at most $2 chars, no trailing ';' (tmux would read it as a command separator).
+flatten() { tr '\n\t\r' '   ' | tr -s ' ' | sed 's/^ //' | cut -c "1-$1" | sed 's/[; ]*$//'; }
+
+# Pane state: pstate <state> [text]. One tmux call.
+pstate() {
+  tmux set -p -t "$TMUX_PANE" @claude_state "$1" \; set -p -t "$TMUX_PANE" @claude_since "$(date +%s)" \
+    \; set -p -t "$TMUX_PANE" @claude_last "${2:-}"
+}
+
+# The last tool Claude called, from its transcript: "Bash : pnpm test".
+last_tool() {
+  tail -n 50 "$1" 2>/dev/null | jq -rs '
+    [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | last | select(. != null)
+    | "\(.name) : \(.input.description // .input.command // .input.file_path // .input.url // .input.pattern // "")"' 2>/dev/null
+}
 
 mark_on() {
   kind=$1
@@ -23,8 +42,12 @@ mark_on() {
 
   tmux set -w -t "$TMUX_PANE" @claude_wait 1
   tmux refresh-client -S
-  # idle_prompt repeats Stop a minute later: marker only, no log, no banner.
-  [ "$kind" = idle ] && return
+  # idle_prompt repeats Stop a minute later: no log, no banner. It also follows an Esc interrupt, which
+  # fires no Stop: a pane still "working" then is in fact waiting for you.
+  if [ "$kind" = idle ]; then
+    [ "$(tmux display -p -t "$TMUX_PANE" '#{@claude_state}')" = work ] && pstate done "interrompu"
+    return
+  fi
 
   IFS=$'\t' read -r win session project < <(tmux display -p -t "$TMUX_PANE" '#{window_id}	#{session_name}	#{window_name}')
   case $kind in
@@ -34,14 +57,13 @@ mark_on() {
                 [ "${bg:-0}" -gt 0 ] 2>/dev/null && title="⏳ $project a fini son tour ($bg tâche(s) en fond)" ;;
     permission) title="🔐 $project demande une permission"
                 # The hook message is generic ("Claude needs your permission"): name the pending tool instead.
-                text=$(tail -n 50 "$(field '.transcript_path // ""')" 2>/dev/null | jq -rs '
-                  [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | last | select(. != null)
-                  | "\(.name) : \(.input.description // .input.command // .input.file_path // .input.url // .input.pattern // "")"' 2>/dev/null)
+                text=$(last_tool "$(field '.transcript_path // ""')")
                 [ -n "$text" ] || text=$(field '.message // ""') ;;
     question)   title="❓ $project te pose une question";   text=$(field '.message // ""') ;;
     *) return ;;
   esac
   text=$(printf '%s' "$text" | flatten 200)
+  if [ "$kind" = done ]; then pstate done "$text"; else pstate blocked "$text"; fi
 
   mkdir -p "$(dirname "$LOG")"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$win" "$kind" "$project" "$session" "$text" >> "$LOG"
@@ -75,6 +97,55 @@ history() {
   goto "${pick%%$'\t'*}"
 }
 
+# One line per Claude pane: "<window id> TAB <sort key> TAB <coloured row>", blocked first, then done, then working.
+board_lines() {
+  local now c_or c_ye c_bl c_gr c_aq c_pu c_re c_fg r
+  now=$(date +%s)
+  c_or=$'\033[38;2;230;152;117m' c_ye=$'\033[38;2;219;188;127m' c_bl=$'\033[38;2;127;187;179m'
+  c_gr=$'\033[38;2;133;146;137m' c_aq=$'\033[38;2;167;192;128m' c_pu=$'\033[38;2;214;153;182m'
+  c_re=$'\033[38;2;230;126;128m' c_fg=$'\033[38;2;211;198;170m' r=$'\033[0m'
+  # Fields split on \x1f, not tab: read merges consecutive tabs, which shifts empty fields.
+  local f=$'\x1f'
+  tmux list-panes -a -F "#{pane_id}$f#{window_id}$f#{session_name}$f#{window_name}$f#{pane_current_command}$f#{@claude_state}$f#{@claude_since}$f#{@claude_ctx}$f#{@claude_effort}$f#{@claude_tx}$f#{@claude_last}" |
+  while IFS=$f read -r pane win session name cmd state since ctx effort tx last; do
+    [ -n "$state$ctx" ] || continue
+    case $cmd in zsh|bash|sh|fish|-zsh|login) continue ;; esac   # Claude has exited, the shell is back
+    case $state in
+      blocked) key=1 label="${c_or}● bloqué  " ;;
+      done)    key=2 label="${c_ye}● à toi   " ;;
+      work)    key=3 label="${c_bl}⟳ travaille"; t=$(last_tool "$tx" | flatten 120); [ -n "$t" ] && last=$t ;;
+      *)       key=4 label="${c_gr}· inactif " ;;
+    esac
+    ago=""
+    if [ -n "$since" ]; then
+      s=$(( now - since ))
+      if [ "$s" -lt 60 ]; then ago="${s} s"; elif [ "$s" -lt 3600 ]; then ago="$(( s / 60 )) min"; else ago="$(( s / 3600 )) h"; fi
+    fi
+    gauge=""
+    if [ -n "$ctx" ]; then
+      if [ "$ctx" -ge 80 ]; then gc=$c_re; elif [ "$ctx" -ge 50 ]; then gc=$c_ye; else gc=$c_aq; fi
+      full=$(( (ctx * 8 + 50) / 100 )); [ "$full" -gt 8 ] && full=8
+      gauge=$gc
+      for ((i = 0; i < 8; i++)); do [ "$i" -eq "$full" ] && gauge+=$c_gr; [ "$i" -lt "$full" ] && gauge+="▰" || gauge+="▱"; done
+      gauge+=$(printf ' %s%3s%%' "$gc" "$ctx")
+    fi
+    printf '%s\t%s\t%s %s%-14.14s%s %s%-10.10s%s %s%-7s%s %s %s%-6s%s %s%s%s\n' \
+      "$win" "$key" "$label$r" "$c_fg" "$name" "$r" "$c_gr" "$session" "$r" "$c_gr" "$ago" "$r" \
+      "$gauge$r" "$c_pu" "$effort" "$r" "$c_gr" "$last" "$r"
+  done | sort -t $'\t' -k2,2n
+}
+
+board() {
+  local lines
+  lines=$(board_lines)
+  [ -n "$lines" ] || { echo "Aucun Claude ouvert dans tmux."; read -r -n 1; return; }
+  pick=$(printf '%s\n' "$lines" |
+    fzf --ansi --reverse --no-sort --track --delimiter '\t' --with-nth 3 --prompt 'claude> ' \
+        --header 'mise à jour toutes les 2 s · Entrée = y aller · Échap = fermer' \
+        --bind "load:reload(sleep 2; '$SELF' board-lines)") || return
+  goto "${pick%%$'\t'*}"
+}
+
 goto() {
   [[ $1 =~ ^@[0-9]+$ ]] || return
   if [ -z "$(tmux display -p -t "$1" '#{window_id}' 2>/dev/null)" ]; then
@@ -92,8 +163,29 @@ case "${1:-}" in
   on)
     [ -n "${TMUX_PANE:-}" ] && mark_on "${2:-done}" >/dev/null 2>&1
     exit 0 ;;
+  prompt)
+    if [ -n "${TMUX_PANE:-}" ]; then
+      text=""
+      [ -t 0 ] || text=$(jq -r '.prompt // ""' 2>/dev/null | flatten 120)
+      [ -n "$text" ] && text="« $text »"
+      { tmux set -w -u -t "$TMUX_PANE" @claude_wait; pstate work "$text"; tmux refresh-client -S; } >/dev/null 2>&1
+    fi
+    exit 0 ;;
   off)
-    [ -n "${TMUX_PANE:-}" ] && { tmux set -w -u -t "$TMUX_PANE" @claude_wait; tmux refresh-client -S; } >/dev/null 2>&1
+    if [ -n "${TMUX_PANE:-}" ]; then
+      {
+        tmux set -w -u -t "$TMUX_PANE" @claude_wait
+        [ "$(tmux display -p -t "$TMUX_PANE" '#{@claude_state}')" = blocked ] && pstate work ""
+        tmux refresh-client -S
+      } >/dev/null 2>&1
+    fi
+    exit 0 ;;
+  end)
+    if [ -n "${TMUX_PANE:-}" ]; then
+      { tmux set -w -u -t "$TMUX_PANE" @claude_wait
+        for o in state since last ctx effort tx; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
+        tmux refresh-client -S; } >/dev/null 2>&1
+    fi
     exit 0 ;;
   next)
     cur=$(tmux display -p '#{window_id}')
@@ -107,5 +199,7 @@ case "${1:-}" in
     ;;
   goto) goto "${2:-}" ;;
   history) history ;;
+  board) board ;;
+  board-lines) board_lines ;;
 esac
 exit 0

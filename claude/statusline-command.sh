@@ -7,6 +7,7 @@ model=$(jq -r '.model.display_name // empty' <<<"$input" 2>/dev/null)
 cwd=$(jq -r '.workspace.current_dir // .cwd // empty' <<<"$input" 2>/dev/null)
 used=$(jq -r '.context_window.used_percentage // empty' <<<"$input" 2>/dev/null)
 effort=$(jq -r '.effort.level // empty' <<<"$input" 2>/dev/null)
+tx=$(jq -r '.transcript_path // empty' <<<"$input" 2>/dev/null)
 
 rgb() { printf '\033[38;2;%d;%d;%dm' "0x${1:0:2}" "0x${1:2:2}" "0x${1:4:2}"; }
 RESET=$'\033[0m'
@@ -34,6 +35,12 @@ if [ -n "$used" ]; then
     if [ "$i" -lt "$full" ]; then bar+="▰"; else bar+="▱"; fi
   done
   out+="   ${bar} ${c}${pct}%${RESET}"
+fi
+
+# Hand context, effort and transcript to the tmux pane, for the Claude board (bin/claude-tmux-wait, prefix A).
+if [ -n "${TMUX_PANE:-}" ]; then
+  tmux set -p -t "$TMUX_PANE" @claude_ctx "${pct:-}" \; set -p -t "$TMUX_PANE" @claude_effort "${effort:-}" \
+    \; set -p -t "$TMUX_PANE" @claude_tx "${tx:-}" >/dev/null 2>&1
 fi
 
 printf '%s' "$out"

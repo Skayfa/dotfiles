@@ -67,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__HOME__/.local/bin/claude-tmux-wait off"
+            "command": "__HOME__/.local/bin/claude-tmux-wait prompt"
           }
         ]
       }
@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "__HOME__/.local/bin/claude-tmux-wait off"
+            "command": "__HOME__/.local/bin/claude-tmux-wait end"
           }
         ]
       }
