@@ -182,6 +182,7 @@ flowchart LR
 - **Fini** (`Stop`) ou **bloqué** (permission, question) → ● sur l'onglet, ligne d'historique, bannière (son seulement quand bloqué, aucune si Alacritty est devant).
 - **Tu réponds** (`UserPromptSubmit`) ou il reprend (`PostToolUse`) → le ● s'éteint ; **il quitte** (`SessionEnd`) → le pane est oublié.
 - La **commande** d'une permission vient de `PermissionRequest` (la transcription ne l'a pas encore) ; le bouton « Autoriser » ne tape `1` que si le pane montre encore cette demande pour cette commande exacte.
+- **Après un redémarrage**, tmux-resurrect restaure les panes puis appelle `claude-tmux-wait restore` : chaque Claude repart avec ses options, sur la dernière conversation de son dossier (`--continue`).
 - `bin/dotfiles-doctor` vérifie toute la chaîne.
 
 `~/.claude/CLAUDE.md` importe [`claude/GLOBAL.md`](claude/GLOBAL.md) (chargé dans tous les projets). Les skills et settings vivent dans `claude/`. Les mods (plugins de hooks) vivent dans `claude/mods/`, une marketplace locale que `install.sh` installe : `dolmen-ops` pour Dolmen ([README](claude/mods/dolmen-ops/README.md)), `pilote` pour suivre un projet perso sans GitHub depuis son `pilotage/pilotage.json` ([README](claude/mods/pilote/README.md)). La boucle de travail : [`WORKFLOW.md`](WORKFLOW.md).

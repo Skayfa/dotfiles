@@ -10,6 +10,8 @@
 #   goto <id>    jump to tmux window <id>, e.g. @12                  (banner click, via Hammerspoon)
 #   history      browse past notifications, Enter jumps there        (tmux: prefix N)
 #   board        every Claude with its state, context, effort, live  (tmux: prefix A)
+#   restore [file]  after tmux-resurrect restored the panes, start Claude again where it ran, on its last
+#                conversation (@resurrect-hook-post-restore-all)
 #   approve <pane> <command>  answer "1. Yes" to a Bash permission prompt (banner button "Autoriser"),
 #                only if the pane shows that prompt with that exact command; else jump there
 # Each Claude pane carries its state in pane options: @claude_state (work | blocked | done), @claude_since,
@@ -172,6 +174,33 @@ approve() {
   fi
 }
 
+# Resurrect saves each pane's full command; it restores a shell. Start the saved Claude again in it, with
+# its own options, resuming: a bare --resume (the picker) becomes --continue (the folder's last conversation),
+# a --resume <id> stays as is.
+restore() {
+  local f=$1 d
+  if [ -z "$f" ]; then
+    d=$(tmux show -gv @resurrect-dir 2>/dev/null)
+    f=${d:-${XDG_DATA_HOME:-$HOME/.local/share}/tmux/resurrect}/last
+  fi
+  [ -r "$f" ] || return
+  awk -F'\t' '$1 == "pane" { print $2 "\t" $3 "\t" $6 "\t" substr($11, 2) }' "$f" |
+  while IFS=$'\t' read -r s w p cmd; do
+    [[ " $cmd " =~ [\ /]claude\  ]] || continue                    # the claude CLI, not claude-tmux-wait
+    [[ " $cmd " =~ \ (-p|--print)\  ]] && continue                 # a one-shot call, nothing to resume
+    case $(tmux display -p -t "$s:$w.$p" '#{pane_current_command}' 2>/dev/null) in
+      zsh|bash|sh|fish) ;;
+      *) continue ;;                                               # gone, or something already runs there
+    esac
+    if [[ " $cmd " =~ \ (--resume|-r)\ [^-\ ] ]] || [[ " $cmd " =~ \ (--continue|-c)\  ]]; then
+      new=$cmd
+    else
+      new=$(sed -E 's/ (--resume|-r)( |$)/\2/' <<<"$cmd")" --continue"
+    fi
+    tmux send-keys -t "$s:$w.$p" -l "$new" \; send-keys -t "$s:$w.$p" Enter
+  done
+}
+
 goto() {
   [[ $1 =~ ^@[0-9]+$ ]] || return
   if [ -z "$(tmux display -p -t "$1" '#{window_id}' 2>/dev/null)" ]; then
@@ -239,6 +268,7 @@ case "${1:-}" in
     ;;
   goto) goto "${2:-}" ;;
   approve) approve "${2:-}" "${3:-}" ;;
+  restore) restore "${2:-}" ;;
   history) history ;;
   board) board ;;
   board-lines) board_lines ;;

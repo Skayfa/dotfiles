@@ -82,6 +82,8 @@ if tmux info >/dev/null 2>&1; then
   nokey=""
   for k in a A N S e g h; do tmux list-keys -T prefix "$k" >/dev/null 2>&1 || nokey+=" $k"; done
   [ -z "$nokey" ] && ok "raccourcis préfixe a A N S e g h chargés" || warn "raccourcis absents :$nokey  → préfixe r"
+  [ "$(tmux show -gv @resurrect-hook-post-restore-all 2>/dev/null)" = "~/.local/bin/claude-tmux-wait restore" ] \
+    && ok "redémarrage : les Claude reprennent leur conversation" || warn "reprise des Claude après redémarrage non branchée  → préfixe r"
   [ "$(tmux show-environment -g FZF_DEFAULT_OPTS_FILE 2>/dev/null)" = "FZF_DEFAULT_OPTS_FILE=$HOME/.config/fzf/fzfrc" ] \
     && ok "popups : fzf Everforest" || warn "popups sans fzfrc  → préfixe r"
 else
