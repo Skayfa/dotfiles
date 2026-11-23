@@ -62,6 +62,44 @@ end
 -- Global hotkey: Ctrl + Alt + T.
 hs.hotkey.bind({ "ctrl", "alt" }, "T", toggleAlacritty)
 
+-- Claude Code banners, sent by bin/claude-tmux-wait as hammerspoon://claude?target=@12&title=...&body=...
+-- No banner while Alacritty is frontmost: the tmux marker already shows it.
+-- Click: bring Alacritty forward and jump to the tmux window that sent it.
+-- Kept in Notification Center (withdrawAfter = 0); full history in tmux: prefix N.
+local claudeOk, claudeErr = pcall(function()
+  local waitCmd = os.getenv("HOME") .. "/.local/bin/claude-tmux-wait"
+  hs.urlevent.bind("claude", function(_, p)
+    local target = p.target or ""
+    if not target:match("^@%d+$") then
+      return -- any app can open a hammerspoon:// URL: accept a tmux window id only
+    end
+    local app = hs.application.find(appName)
+    if app and app:isFrontmost() then
+      return
+    end
+    hs.notify
+      .new(function()
+        local a = hs.application.find(appName)
+        if a then
+          showApp(a)
+        else
+          hs.application.launchOrFocus(appName)
+        end
+        hs.task.new(waitCmd, nil, { "goto", target }):start()
+      end, {
+        title = p.title or "Claude",
+        subTitle = p.subtitle or "",
+        informativeText = p.body or "",
+        soundName = (p.sound == "1") and hs.notify.defaultNotificationSound or nil,
+        withdrawAfter = 0,
+      })
+      :send()
+  end)
+end)
+if not claudeOk then
+  hs.alert.show("Notifications Claude : " .. tostring(claudeErr))
+end
+
 -- Load feedback + Accessibility check (global hotkeys require Accessibility permission).
 if hs.accessibilityState() then
   hs.alert.show("Hammerspoon chargé")

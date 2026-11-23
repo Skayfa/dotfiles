@@ -21,5 +21,76 @@
   "teammateMode": "in-process",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait on done"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait on permission"
+          }
+        ],
+        "matcher": "permission_prompt"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait on question"
+          }
+        ],
+        "matcher": "elicitation_dialog|agent_needs_input"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait on idle"
+          }
+        ],
+        "matcher": "idle_prompt"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait off"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait off"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__HOME__/.local/bin/claude-tmux-wait off"
+          }
+        ]
+      }
+    ]
   }
 }

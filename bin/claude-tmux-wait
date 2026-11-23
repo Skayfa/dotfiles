@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# claude-tmux-wait — tell you which Claude Code is waiting for you: tmux marker, macOS banner, history.
+#   on <kind>  mark the window of $TMUX_PANE, log it, send a banner
+#              kinds: done (hook Stop), permission | question | idle (hook Notification, by matcher)
+#   off        clear the mark (hooks: UserPromptSubmit, PostToolUse, SessionEnd)
+#   next       jump to the next waiting window, any session (tmux: prefix a)
+#   goto <id>  jump to tmux window <id>, e.g. @12 (banner click, via Hammerspoon)
+#   history    browse past notifications, Enter jumps there (tmux: prefix N)
+# Hook modes stay silent and always exit 0: a non-zero exit could block Claude.
+
+# Hammerspoon runs us with launchd's bare PATH.
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/claude-tmux-wait/history.tsv"
+
+# One line, no tabs, at most $2 chars.
+flatten() { tr '\n\t\r' '   ' | tr -s ' ' | sed 's/^ //' | cut -c "1-$1"; }
+
+mark_on() {
+  kind=$1
+  payload=""
+  [ -t 0 ] || payload=$(cat)
+  field() { printf '%s' "$payload" | jq -r "$1" 2>/dev/null; }
+
+  tmux set -w -t "$TMUX_PANE" @claude_wait 1
+  tmux refresh-client -S
+  # idle_prompt repeats Stop a minute later: marker only, no log, no banner.
+  [ "$kind" = idle ] && return
+
+  IFS=$'\t' read -r win session project < <(tmux display -p -t "$TMUX_PANE" '#{window_id}	#{session_name}	#{window_name}')
+  case $kind in
+    done)       title="✅ $project a fini";                 text=$(field '.last_assistant_message // ""')
+                # Background tasks still running (agents, shells): say so, the turn may not be the end.
+                bg=$(field '.background_tasks // [] | length')
+                [ "${bg:-0}" -gt 0 ] 2>/dev/null && title="⏳ $project a fini son tour ($bg tâche(s) en fond)" ;;
+    permission) title="🔐 $project demande une permission"
+                # The hook message is generic ("Claude needs your permission"): name the pending tool instead.
+                text=$(tail -n 50 "$(field '.transcript_path // ""')" 2>/dev/null | jq -rs '
+                  [.[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use")] | last | select(. != null)
+                  | "\(.name) : \(.input.description // .input.command // .input.file_path // .input.url // .input.pattern // "")"' 2>/dev/null)
+                [ -n "$text" ] || text=$(field '.message // ""') ;;
+    question)   title="❓ $project te pose une question";   text=$(field '.message // ""') ;;
+    *) return ;;
+  esac
+  text=$(printf '%s' "$text" | flatten 200)
+
+  mkdir -p "$(dirname "$LOG")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$win" "$kind" "$project" "$session" "$text" >> "$LOG"
+
+  # Banner via Hammerspoon (hammerspoon/init.lua). Sound only when Claude is blocked on you.
+  sound=0; [ "$kind" = done ] || sound=1
+  query=$(jq -rn --arg t "$win" --arg ti "$title" --arg s "$session" --arg b "$text" --arg so "$sound" \
+    '"target=\($t|@uri)&title=\($ti|@uri)&subtitle=\($s|@uri)&body=\($b|@uri)&sound=\($so)"')
+  open -g "hammerspoon://claude?$query"
+}
+
+history() {
+  [ -s "$LOG" ] || { echo "Aucune notification pour l'instant."; read -r -n 1; return; }
+  # Keep the log small: trim here, not in the hooks.
+  if [ "$(wc -l < "$LOG")" -gt 1000 ]; then
+    tail -n 500 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+  fi
+  waiting=$(tmux list-windows -a -F '#{?@claude_wait,#{window_id},}' | tr '\n' ' ')
+  today=$(date '+%Y-%m-%d')
+  pick=$(tail -r "$LOG" |
+    awk -F '\t' -v today="$today" -v waiting=" $waiting " '
+      {
+        split($1, d, " "); split(d[1], ymd, "-")
+        when = (d[1] == today) ? d[2] : ymd[3] "/" ymd[2] " " d[2]
+        icon = ($3 == "done") ? "✅" : ($3 == "permission") ? "🔐" : "❓"
+        dot = index(waiting, " " $2 " ") ? "●" : " "
+        printf "%s\t%-11s %s %s %-14s %-12s %s\n", $2, when, dot, icon, $4, $5, $6
+      }' |
+    fzf --reverse --delimiter '\t' --with-nth 2 --no-sort \
+        --prompt 'notif> ' --header '● = attend encore · Entrée = y aller · Échap = fermer') || return
+  goto "${pick%%$'\t'*}"
+}
+
+goto() {
+  [[ $1 =~ ^@[0-9]+$ ]] || return
+  if [ -z "$(tmux display -p -t "$1" '#{window_id}' 2>/dev/null)" ]; then
+    tmux display "Cette fenêtre n'existe plus"
+    return
+  fi
+  if [ -n "${TMUX:-}" ]; then
+    tmux switch-client -t "$1"
+  else
+    tmux switch-client -c "$(tmux list-clients -F '#{client_name}' | head -1)" -t "$1"
+  fi
+}
+
+case "${1:-}" in
+  on)
+    [ -n "${TMUX_PANE:-}" ] && mark_on "${2:-done}" >/dev/null 2>&1
+    exit 0 ;;
+  off)
+    [ -n "${TMUX_PANE:-}" ] && { tmux set -w -u -t "$TMUX_PANE" @claude_wait; tmux refresh-client -S; } >/dev/null 2>&1
+    exit 0 ;;
+  next)
+    cur=$(tmux display -p '#{window_id}')
+    # Waiting windows in list order, rotated to start after the current one.
+    target=$(tmux list-windows -a -F '#{?@claude_wait,1,0} #{window_id}' |
+      awk -v cur="$cur" '
+        $2 == cur { seen = 1; next }
+        $1 == 1 { if (seen && !after) after = $2; if (!first) first = $2 }
+        END { print (after ? after : first) }')
+    if [ -n "$target" ]; then goto "$target"; else tmux display "Aucun Claude ne t'attend"; fi
+    ;;
+  goto) goto "${2:-}" ;;
+  history) history ;;
+esac
+exit 0

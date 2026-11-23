@@ -2,6 +2,21 @@
    TMUX — AIDE-MÉMOIRE        (préfixe = ⌘b ou Ctrl-b)
    ════════════════════════════════════════════════════
 
+   ▸ LIRE LA BARRE DU BAS
+       bloc session ORANGE  le préfixe est armé : tmux attend ta touche
+       ●  sur un onglet     le Claude de cette fenêtre t'attend
+                            (il a fini, ou il demande une permission)
+       « pro ● » à droite   un Claude t'attend dans une AUTRE session
+        main  à droite    branche git du pane actif
+         sur un onglet     un pane est zoomé (préfixe z pour revenir)
+       titre en haut        quand la fenêtre est découpée : n° · dossier · commande
+
+   ▸ CLAUDE
+       préfixe  a           aller au prochain Claude qui t'attend (toutes sessions)
+       préfixe  N           historique des notifications Claude (Entrée = y aller)
+       bannière macOS       quand un Claude finit (silencieuse) ou te bloque (avec son),
+                            seulement si tu n'es pas dans Alacritty — clic = y aller
+
    ▸ PANES  (les cadres dans une fenêtre)
        ⌥ ← / → / ↑ / ↓      aller au pane gauche/droite/haut/bas   ← SANS préfixe
        préfixe  v           split en COLONNES (côte à côte  | )
@@ -20,7 +35,8 @@
        préfixe  w           vue arborescente fenêtres + sessions
 
    ▸ SESSIONS  (tmux continue de tourner même fermé)
-       préfixe  S           lister les sessions et switcher (popup fzf)
+       préfixe  S           CHANGER DE SESSION (liste, tape, Entrée)
+       préfixe  Tab         chercher une fenêtre ou une session (tape, Entrée)
        préfixe  ( / )       session précédente / suivante
        préfixe  d           se détacher (revient au shell)
        tmux a               se rattacher    (dans le shell)
