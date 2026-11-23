@@ -1,49 +1,41 @@
+# Prompt on two lines, so each command stands out from the output above it:
+#   line 1: folder in a blue pill, * when the git tree is dirty, branch only outside tmux (inside, the
+#           tmux bar shows it), duration of slow commands, exit code when the last command failed
+#   line 2: ❯ green, red after a failure. No time: the tmux bar and the macOS menu bar have it.
+# Colours: Everforest, as tmux, Alacritty and the Claude Code status line.
 command_timeout = 1000
+add_newline = true
 
-format = """\
-[](bg:#030B16 fg:#7DF9AA)\
-[󰀵 ](bg:#7DF9AA fg:#090c0c)\
-[](fg:#7DF9AA bg:#1C3A5E)\
-$time\
-[](fg:#1C3A5E bg:#3B76F0)\
-$directory\
-[](fg:#3B76F0 bg:#FCF392)\
-$git_branch\
-$git_status\
-$git_metrics\
-[](fg:#FCF392 bg:#030B16)\
-$character\
-"""
+format = "[](fg:#7fbbb3)$directory[](fg:#7fbbb3)${custom.dirty}${custom.branch}$cmd_duration$status$line_break$character"
 
 [directory]
-format = "[ ﱮ $path ]($style)"
-style = "fg:#E4E4E4 bg:#3B76F0"
+format = "[ $path ]($style)"
+style = "bold fg:#2d353b bg:#7fbbb3"
+truncation_length = 4
+truncate_to_repo = false
 
-[git_branch]
-format = '[ $symbol$branch(:$remote_branch) ]($style)'
-symbol = "  "
-style = "fg:#1C3A5E bg:#FCF392"
+[custom.dirty]
+when = 'test -n "$(git status --porcelain 2>/dev/null | head -1)"'
+command = "echo '*'"
+shell = ["sh"]
+format = "[ $output](fg:#e69875)"
 
-[git_status]
-format = '[$all_status]($style)'
-style = "fg:#1C3A5E bg:#FCF392"
-
-[git_metrics]
-format = "([+$added]($added_style))[]($added_style)"
-added_style = "fg:#1C3A5E bg:#FCF392"
-deleted_style = "fg:bright-red bg:235"
-disabled = false
+[custom.branch]
+when = 'test -z "$TMUX" && git rev-parse --git-dir >/dev/null 2>&1'
+command = "git branch --show-current"
+shell = ["sh"]
+format = "[  $output](fg:#83c092)"
 
 [cmd_duration]
-format = "[  $duration ]($style)"
-style = "fg:bright-white bg:18"
+min_time = 2000
+format = "[  $duration]($style)"
+style = "fg:#859289"
 
 [character]
-success_symbol = '[ ➜](bold green) '
-error_symbol = '[ ✗](#E84D44) '
+success_symbol = "[❯](bold fg:#a7c080)"
+error_symbol = "[❯](bold fg:#e67e80)"
 
-[time]
+[status]
 disabled = false
-time_format = "%R" # Hour:Minute Format
-style = "bg:#1d2230"
-format = '[[ 󱑍 $time ](bg:#1C3A5E fg:#8DFBD2)]($style)'
+format = "[ ✗ $status]($style)"
+style = "bold fg:#e67e80"

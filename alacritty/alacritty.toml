@@ -54,6 +54,10 @@ bindings = [
   { key = "N", mods = "Alt", chars = "~" },
   # Cmd+Delete -> efface toute la ligne (Ctrl-U = kill-whole-line en zsh), comme sur macOS
   { key = "Back", mods = "Command", chars = "\u0015" },
+  # Cmd+←/→ -> début / fin de ligne (Ctrl-A / Ctrl-E), comme sur macOS. Sans ça, tmux les lit comme
+  # ⌥+flèches et change de pane : ⌥ garde les panes (et les mots), ⌘ la ligne.
+  { key = "Left", mods = "Command", chars = "\u0001" },
+  { key = "Right", mods = "Command", chars = "\u0005" },
 ]
 
 # --- Couleurs : palette Everforest Dark (sombre, bon contraste, lisible) ---

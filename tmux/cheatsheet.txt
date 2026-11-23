@@ -19,6 +19,8 @@
 
    ▸ PANES  (les cadres dans une fenêtre)
        ⌥ ← / → / ↑ / ↓      aller au pane gauche/droite/haut/bas   ← SANS préfixe
+                            (pas de pane de ce côté : ⌥←/→ saute un mot)
+       ⌘ ← / →              début / fin de ligne (zsh, Claude)
        préfixe  v           split en COLONNES (côte à côte  | )
        préfixe  s           split en LIGNES  (l'un sous l'autre - )
        préfixe  z           ZOOM plein écran le pane / dézoom
