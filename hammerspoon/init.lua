@@ -106,6 +106,11 @@ local claudeOk, claudeErr = pcall(function()
       :send()
   end)
 end)
+-- Every 3 min: flag a Claude that loops (claude-tmux-wait watch). Global, or the timer is garbage-collected.
+claudeWatchTimer = hs.timer.doEvery(180, function()
+  hs.task.new(os.getenv("HOME") .. "/.local/bin/claude-tmux-wait", nil, { "watch" }):start()
+end)
+
 if not claudeOk then
   hs.alert.show("Notifications Claude : " .. tostring(claudeErr))
 end

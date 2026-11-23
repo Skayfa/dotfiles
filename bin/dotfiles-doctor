@@ -14,10 +14,10 @@ section() { printf '\n%s%s%s\n' "$B" "$1" "$N"; }
 
 section "Outils"
 missing=""
-for t in git tmux jq fzf fd zed gh lazygit hunk starship nvim gopls; do
+for t in git tmux jq fzf fd zed gh lazygit hunk starship nvim gopls claude perl; do
   command -v "$t" >/dev/null 2>&1 || missing+=" $t"
 done
-[ -z "$missing" ] && ok "tous présents (git tmux jq fzf fd zed gh lazygit hunk starship nvim gopls)" \
+[ -z "$missing" ] && ok "tous présents (git tmux jq fzf fd zed gh lazygit hunk starship nvim gopls claude perl)" \
   || fail "absents :$missing  → brew bundle --file=$DOTFILES/Brewfile"
 if brew bundle check --file="$DOTFILES/Brewfile" >/dev/null 2>&1; then ok "Brewfile satisfait"
 else warn "Brewfile pas satisfait  → brew bundle check --verbose --file=$DOTFILES/Brewfile"; fi

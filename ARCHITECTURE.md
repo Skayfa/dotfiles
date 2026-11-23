@@ -182,6 +182,11 @@ flowchart LR
 - **Fini** (`Stop`) ou **bloqué** (permission, question) → ● sur l'onglet, ligne d'historique, bannière (son seulement quand bloqué, aucune si Alacritty est devant).
 - **Tu réponds** (`UserPromptSubmit`) ou il reprend (`PostToolUse`) → le ● s'éteint ; **il quitte** (`SessionEnd`) → le pane est oublié.
 - La **commande** d'une permission vient de `PermissionRequest` (la transcription ne l'a pas encore) ; le bouton « Autoriser » ne tape `1` que si le pane montre encore cette demande pour cette commande exacte.
+- **L'IA trie** (Haiku via `claude -p`, isolé : sans outils, sans MCP, depuis `/tmp`, jamais bloquant) :
+  - fin de tâche → 🔴 *décision* (bannière + son), 🟡 *à relire* (bannière muette), ⚪ *info* (pas de bannière), avec un résumé d'une phrase repris dans le tableau et l'historique ;
+  - permission → ce que fait vraiment l'action et son risque (✓ / ⚠ / ⛔) ; ⛔ retire le bouton « Autoriser » ;
+  - toutes les 3 min (minuterie Hammerspoon, `claude-tmux-wait watch`) → un Claude qui travaille depuis 10 min et répète la même commande ou la même erreur est signalé « ⚠ boucle ».
+  Si l'appel échoue, on retombe sur la bannière simple.
 - **Après un redémarrage**, tmux-resurrect restaure les panes puis appelle `claude-tmux-wait restore` : chaque Claude repart avec ses options, sur la dernière conversation de son dossier (`--continue`).
 - `bin/dotfiles-doctor` vérifie toute la chaîne.
 
