@@ -24,6 +24,7 @@ flowchart TD
     TMUX --> ZSH
     ALA -. "Cmd+Shift+clic → zed-open" .-> ZED
     TMUX -. "préfixe e" .-> ZED
+    TMUX -. "préfixe f → open-file" .-> ZED
 
     subgraph lanc["Lancés depuis zsh / tmux"]
         NVIM["Neovim · NvChad 2.5<br/>retouches rapides"]
@@ -50,6 +51,7 @@ flowchart TD
 | ------------------------------ | ------------------------------------ | --------------------------------------------------------------- |
 | `Cmd+B`                        | Alacritty → tmux                     | envoie `Ctrl-b` (0x02) = **préfixe tmux**                       |
 | `Shift+Entrée`                 | Alacritty                            | saut de ligne (saisie multi-ligne Claude Code)                  |
+| `préfixe f` | tmux popup → `bin/open-file` | choisir un fichier (chemins cités à l'écran, même coupés sur deux lignes, puis le dossier) : Entrée app par défaut · `^F` Finder · `^E` Zed · `^Y` copier |
 | `Cmd+Shift+clic` sur un chemin | Alacritty `[hints]` → `bin/zed-open` | ouvre le fichier dans **Zed** (résout `~`, le cwd du pane tmux) |
 | `Cmd+Shift+clic` sur une URL   | Alacritty `[hints]`                  | ouvre dans le navigateur                                        |
 | `Ctrl+Alt+T`                   | Hammerspoon                          | **dropdown** Alacritty (pleine hauteur, marges latérales)       |
@@ -216,7 +218,7 @@ dotfiles/
 ├── hunk/                 # config.toml (diff viewer de review + annotations agent)
 ├── git/                  # config (alias hdiff/hshow ; l'identité reste dans ~/.gitconfig)
 ├── nvim/                 # config NvChad 2.5 complète (lua/…)
-├── bin/                  # claude-tmux-wait · dotfiles-doctor · zed-open · hunk-log · ccw
+├── bin/                  # claude-tmux-wait · dotfiles-doctor · zed-open · open-file · hunk-log · ccw
 └── claude/               # CLAUDE.md · GLOBAL.md · settings.json · skills/ · mods/
 ```
 

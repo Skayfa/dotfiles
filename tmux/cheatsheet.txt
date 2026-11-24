@@ -63,6 +63,9 @@
                             relire (Échap sort, quitter hunk revient à la liste)
        préfixe  e           Zed — ouvre le projet courant (l'IDE : lire, naviguer)
                             ⌘P fichier · ⌘⇧F chercher · ⌘clic définition
+       préfixe  f           OUVRIR UN FICHIER : d'abord les chemins cités à l'écran
+                            (ceux de Claude, même coupés sur deux lignes), puis le dossier
+                            Entrée ouvrir · ^F Finder · ^E Zed · ^Y copier le chemin
        préfixe  D           lazysql — bases de données (popup)
        préfixe  [           mode défilement/copie   (q pour sortir)
        préfixe  r           recharger cette config

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# open-file — pick a file and open it: default app, Finder, Zed, or copy its path.
+# Candidates: paths shown in the pane (what Claude just cited, newest first), then the files under its folder.
+# Usage (tmux popup): open-file <pane_id>   — run from the pane's current path.
+PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+pane=${1:-}
+cwd=$PWD
+
+cited() {
+  [ -n "$pane" ] || return
+  tmux capture-pane -p -J -S -400 -t "$pane" 2>/dev/null \
+    | awk -v re='~?[A-Za-z0-9._-]*/[A-Za-z0-9._/@+-]+' '
+        # Claude wraps a long path onto the next line, indented: also try the end of a line glued to the next start.
+        { line=$0; sub(/[ \t]+$/, "", line)
+          if (prev != "") { t=line; sub(/^[ \t]+/, "", t); if (match(t, "^" re)) print prev substr(t, 1, RLENGTH) }
+          prev=""; rest=line
+          while (match(rest, re)) { tok=substr(rest, RSTART, RLENGTH); print tok
+            if (RSTART + RLENGTH - 1 == length(rest)) prev=tok
+            rest=substr(rest, RSTART + RLENGTH) } }' | tail -r \
+    | while read -r p; do
+        p=${p%%:*}; p=${p%.}
+        case "$p" in "~/"*) p="$HOME/${p#"~/"}" ;; /*) ;; *) p="$cwd/$p" ;; esac
+        [ -e "$p" ] && [ "$p" != / ] && [ "$p" != "$cwd" ] && [ "$p" != "$HOME" ] && printf '%s\n' "$p"
+      done
+}
+
+files() { fd --type f --hidden --exclude .git --max-results 20000 . "$cwd" 2>/dev/null; }
+
+# Show paths under the pane's folder relative to it, others with ~.
+pretty() { awk -v c="$cwd/" -v h="$HOME/" '!seen[$0]++ { p=$0; if (index(p,c)==1) p=substr(p,length(c)+1); else if (index(p,h)==1) p="~/" substr(p,length(h)+1); print $0 "\t" p }'; }
+
+pick=$( { cited; files; } | pretty | fzf --delimiter='\t' --with-nth=2 --no-sort --reverse --keep-right \
+  --prompt='fichier> ' \
+  --header='Entrée ouvrir · ^F Finder · ^E Zed · ^Y copier' \
+  --expect=ctrl-f,ctrl-e,ctrl-y \
+  --preview='if [ -d {1} ]; then ls -1p {1}; else file -b {1}; echo; head -c 20000 {1} | head -80; fi' \
+  --preview-window='right,55%,wrap')
+[ -n "$pick" ] || exit 0
+key=$(sed -n 1p <<<"$pick")
+path=$(sed -n 2p <<<"$pick" | cut -f1)
+[ -n "$path" ] || exit 0
+
+case "$key" in
+  ctrl-f) open -R "$path" ;;
+  ctrl-e) zed "$path" ;;
+  ctrl-y) printf '%s' "$path" | pbcopy; tmux display "Copié : $path" ;;
+  *)      open "$path" ;;
+esac
