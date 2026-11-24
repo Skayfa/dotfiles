@@ -31,10 +31,12 @@ pretty() { awk -v c="$cwd/" -v h="$HOME/" '!seen[$0]++ { p=$0; if (index(p,c)==1
 
 pick=$( { cited; files; } | pretty | fzf --delimiter='\t' --with-nth=2 --no-sort --reverse --keep-right \
   --prompt='fichier> ' \
-  --header='Entrée ouvrir · ^F Finder · ^E Zed · ^Y copier' \
+  --header='Entrée ouvrir   ^F Finder   ^E Zed   ^Y copier le chemin' --header-first \
+  --color='header:#dbbc7f:bold' \
+  --border-label=' Entrée ouvrir · ^F Finder · ^E Zed · ^Y copier · Échap fermer ' --border-label-pos=bottom \
   --expect=ctrl-f,ctrl-e,ctrl-y \
   --preview='if [ -d {1} ]; then ls -1p {1}; else file -b {1}; echo; head -c 20000 {1} | head -80; fi' \
-  --preview-window='right,55%,wrap')
+  --preview-window='right,50%,wrap,<110(down,40%,wrap)')
 [ -n "$pick" ] || exit 0
 key=$(sed -n 1p <<<"$pick")
 path=$(sed -n 2p <<<"$pick" | cut -f1)
