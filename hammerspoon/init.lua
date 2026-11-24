@@ -66,7 +66,8 @@ hs.hotkey.bind({ "ctrl", "alt" }, "T", toggleAlacritty)
 -- No banner while Alacritty is frontmost: the tmux marker already shows it.
 -- Click: bring Alacritty forward and jump to the tmux window that sent it.
 -- Permission for a short Bash command: an "Autoriser" button answers Yes, after claude-tmux-wait checks the
--- pane still shows that exact prompt (otherwise it jumps there instead).
+-- pane still shows that exact prompt (otherwise it jumps there instead). A frozen Claude gets "Relancer":
+-- claude-tmux-wait nudge interrupts the stuck turn and asks it to resume, after checking it is still stuck.
 -- Kept in Notification Center (withdrawAfter = 0); full history in tmux: prefix N.
 local claudeOk, claudeErr = pcall(function()
   local waitCmd = os.getenv("HOME") .. "/.local/bin/claude-tmux-wait"
@@ -79,13 +80,20 @@ local claudeOk, claudeErr = pcall(function()
     if app and app:isFrontmost() then
       return
     end
-    local pane, cmd = p.pane or "", p.cmd or ""
-    local canApprove = pane:match("^%%%d+$") ~= nil and cmd ~= ""
+    local pane, cmd, act = p.pane or "", p.cmd or "", p.act or ""
+    local validPane = pane:match("^%%%d+$") ~= nil
+    local canApprove = validPane and cmd ~= ""
+    local canNudge = validPane and act == "nudge"
     hs.notify
       .new(function(n)
-        if canApprove and n:activationType() == hs.notify.activationTypes.actionButtonClicked then
-          hs.task.new(waitCmd, nil, { "approve", pane, cmd }):start()
-          return
+        if n:activationType() == hs.notify.activationTypes.actionButtonClicked then
+          if canApprove then
+            hs.task.new(waitCmd, nil, { "approve", pane, cmd }):start()
+            return
+          elseif canNudge then
+            hs.task.new(waitCmd, nil, { "nudge", pane }):start()
+            return
+          end
         end
         local a = hs.application.find(appName)
         if a then
@@ -95,8 +103,8 @@ local claudeOk, claudeErr = pcall(function()
         end
         hs.task.new(waitCmd, nil, { "goto", target }):start()
       end, {
-        hasActionButton = canApprove,
-        actionButtonTitle = "Autoriser",
+        hasActionButton = canApprove or canNudge,
+        actionButtonTitle = canApprove and "Autoriser" or "Relancer",
         title = p.title or "Claude",
         subTitle = p.subtitle or "",
         informativeText = p.body or "",

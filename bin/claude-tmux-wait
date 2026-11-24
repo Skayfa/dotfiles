@@ -15,10 +15,12 @@
 #   goto <id>    jump to tmux window <id>, e.g. @12                  (banner click, via Hammerspoon)
 #   history      browse past notifications, Enter jumps there        (tmux: prefix N)
 #   board        every Claude with its state, context, effort, live  (tmux: prefix A)
-#   watch        flag a Claude that loops, or that is frozen: working, its session silent for 10 min
-#                (Hammerspoon timer, every 3 min)
+#   watch        flag a Claude that loops, or that is frozen: working, its session silent for 10 min, then
+#                relaunched on its own (3 times in 2 h at most) (Hammerspoon timer, every 3 min)
 #   restore [file]  after tmux-resurrect restored the panes, start Claude again where it ran, on its last
 #                conversation (@resurrect-hook-post-restore-all)
+#   nudge <pane> banner button "Relancer" on a frozen Claude: Esc, then "pick up where you were"; only if
+#                it still runs a turn silent for 10 min, else jump there
 #   approve <pane> <command>  answer "1. Yes" to a Bash permission prompt (banner button "Autoriser"),
 #                only if the pane shows that prompt with that exact command; else jump there
 # Each Claude pane carries its state in pane options: @claude_state (work | blocked | done), @claude_since,
@@ -73,6 +75,27 @@ track_tasks() {
     | ($t | map(select(.status == "completed")) | length) as $d
     | "\($d)/\($t | length) \([$t[] | select(.status == "in_progress") | .active] | first // "")"' "$f")
   tmux set -p -t "$TMUX_PANE" @claude_progress "$progress" \; set -p -t "$TMUX_PANE" @claude_doing "$(printf '%s' "$doing" | flatten 80)"
+}
+
+# A Claude Code pane in the middle of a turn shows "esc to interrupt" at its bottom.
+working_screen() { tmux capture-pane -p -t "$1" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 25 | grep -q 'esc to interrupt'; }
+
+# Banner button "Relancer" on a frozen Claude: interrupt the stuck turn, then ask it to pick up where it
+# was. Only if the pane still runs a turn whose session has not moved for 10 min; else jump there.
+nudge() {
+  local pane=$1 win tx mt now
+  [[ $pane =~ ^%[0-9]+$ ]] || return
+  win=$(tmux display -p -t "$pane" '#{window_id}' 2>/dev/null) || return
+  tx=$(tmux display -p -t "$pane" '#{@claude_tx}'); now=$(date +%s)
+  mt=$(stat -f %m "$tx" 2>/dev/null || echo "$now")
+  if [ "$(tmux display -p -t "$pane" '#{pane_in_mode}')" = 0 ] && working_screen "$pane" && [ $((now - mt)) -ge 600 ]; then
+    tmux send-keys -t "$pane" Escape
+    sleep 2
+    tmux send-keys -t "$pane" -l "Tu étais figé depuis $(( (now - mt) / 60 )) min (tour interrompu) : reprends où tu en étais."
+    tmux send-keys -t "$pane" Enter
+  else
+    goto "$win"
+  fi
 }
 
 # Stop guard. Claude says it will resume when its agents or tasks finish, but none is running: nothing will
@@ -137,14 +160,15 @@ Appels (du plus ancien au plus récent) :
 # Log a line and send the banner. notify <window> <session> <project> <kind> <title> <text> <sound 0|1|-> [cmd pane]
 # sound "-" logs only, no banner.
 notify() {
-  local win=$1 session=$2 project=$3 kind=$4 title=$5 text=$6 sound=$7 cmd=${8:-} pane=${9:-}
+  local win=$1 session=$2 project=$3 kind=$4 title=$5 text=$6 sound=$7 cmd=${8:-} pane=${9:-} act=${10:-}
   mkdir -p "$(dirname "$LOG")"
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$win" "$kind" "$project" "$session" "$text" >> "$LOG"
   [ "$sound" = - ] && return
   query=$(jq -rn --arg t "$win" --arg ti "$title" --arg s "$session" --arg b "$text" --arg so "$sound" \
-    --arg p "$pane" --arg c "$cmd" \
+    --arg p "$pane" --arg c "$cmd" --arg a "$act" \
     '"target=\($t|@uri)&title=\($ti|@uri)&subtitle=\($s|@uri)&body=\($b|@uri)&sound=\($so)"
-     + (if $c != "" then "&pane=\($p|@uri)&cmd=\($c|@uri)" else "" end)')
+     + (if $c != "" then "&pane=\($p|@uri)&cmd=\($c|@uri)" else "" end)
+     + (if $a != "" then "&pane=\($p|@uri)&act=\($a|@uri)" else "" end)')
   open -g "hammerspoon://claude?$query"
 }
 
@@ -186,6 +210,13 @@ watch() {
   now=$(date +%s)
   tmux list-panes -a -F "#{pane_id}$f#{window_id}$f#{session_name}$f#{window_name}$f#{@claude_state}$f#{@claude_since}$f#{@claude_tx}$f#{@claude_loop_for}$f#{@claude_loop_checked}$f#{@claude_stall_for}" |
   while IFS=$f read -r pane win session name state since tx loopfor checked stallfor; do
+    # A turn that ended without telling (a peer's or a teammate's message starts one, and its end raises no
+    # Stop): the pane says "working" but the screen shows no running turn. Put it right, quietly.
+    if [ "$state" = work ] && ! working_screen "$pane"; then
+      mt=$(stat -f %m "$tx" 2>/dev/null || echo "$now")
+      [ $((now - mt)) -ge 120 ] && tmux set -p -t "$pane" @claude_state done \; set -p -t "$pane" @claude_class info
+      continue
+    fi
     # Frozen: working, but its session has not moved for 10 min. A tool still running (its call has no
     # result yet) is a long command, flagged at 30 min; otherwise Claude itself is stuck. Once per silence.
     if [ "$state" = work ] && [ -f "$tx" ]; then
@@ -198,8 +229,17 @@ watch() {
           | "\(.name) : \(.input.command // .input.description // .input.file_path // "")"' 2>/dev/null | flatten 100)
         mins=$(( (now - mt) / 60 ))
         if [ -z "$pending" ]; then
+          # Truly stuck in a turn: relaunched on its own (you may be away, or asleep), at most 3 times in
+          # 2 h; past that, a banner with the "Relancer" button and it waits for you.
           tmux set -p -t "$pane" @claude_stall_for "$mt" \; set -p -t "$pane" @claude_stall "figé depuis $mins min, sans outil en cours"
-          notify "$win" "$session" "$name" stall "⏸ $name semble figé" "plus rien depuis $mins min, aucun outil en cours" 1
+          recent=$(tmux display -p -t "$pane" '#{@claude_nudges}' | tr ' ' '\n' | awk -v t=$((now - 7200)) '$1 >= t' | tr '\n' ' ')
+          if [ "$(wc -w <<<"$recent")" -lt 3 ]; then
+            tmux set -p -t "$pane" @claude_nudges "$recent$now"
+            nudge "$pane" >/dev/null 2>&1
+            notify "$win" "$session" "$name" stall "↻ $name était figé, relancé" "plus rien depuis $mins min : tour interrompu et repris" 0
+          else
+            notify "$win" "$session" "$name" stall "⏸ $name reste figé" "relancé 3 fois en 2 h, plus rien depuis $mins min : à toi de voir" 1 "" "$pane" nudge
+          fi
         elif [ $((now - mt)) -ge 1800 ]; then
           tmux set -p -t "$pane" @claude_stall_for "$mt" \; set -p -t "$pane" @claude_stall "commande longue ($mins min) : $pending"
           notify "$win" "$session" "$name" stall "⏳ $name : une commande tourne depuis $mins min" "$pending" 0
@@ -476,7 +516,7 @@ case "${1:-}" in
   end)
     if [ -n "${TMUX_PANE:-}" ]; then
       { tmux set -w -u -t "$TMUX_PANE" @claude_wait
-        for o in state since last class progress doing stall stall_for ctx effort tx perm_tool perm_cmd perm_text perm_level perm_why perm_for loop loop_for loop_checked; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
+        for o in state since last class progress doing stall stall_for nudges ctx effort tx perm_tool perm_cmd perm_text perm_level perm_why perm_for loop loop_for loop_checked; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
         tmux refresh-client -S; } >/dev/null 2>&1
     fi
     exit 0 ;;
@@ -492,6 +532,7 @@ case "${1:-}" in
     ;;
   goto) goto "${2:-}" ;;
   approve) approve "${2:-}" "${3:-}" ;;
+  nudge) nudge "${2:-}" ;;
   restore) restore "${2:-}" ;;
   history) history ;;
   board) board ;;
