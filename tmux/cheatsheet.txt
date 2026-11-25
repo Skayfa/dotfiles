@@ -4,15 +4,17 @@
 
    ▸ LIRE LA BARRE DU BAS
        bloc session ORANGE  le préfixe est armé : tmux attend ta touche
-       ●  sur un onglet     le Claude de cette fenêtre t'attend
-                            (il a fini, ou il demande une permission)
-       « pro ● » à droite   un Claude t'attend dans une AUTRE session
+       ●  sur un onglet     un Claude de cette fenêtre t'attend :
+                              ● rouge  décision, permission, question, figé, en boucle
+                              ● jaune  il a fini, à relire   (rien pour une simple info)
+       « pro ● » à droite   un Claude t'attend dans une AUTRE session (même couleurs)
         main  à droite    branche git du pane actif
          sur un onglet     un pane est zoomé (préfixe z pour revenir)
        titre en haut        quand la fenêtre est découpée : n° · dossier · commande
 
    ▸ CLAUDE
-       préfixe  a           aller au prochain Claude qui t'attend (toutes sessions)
+       préfixe  a           aller au prochain Claude qui t'attend (toutes sessions) :
+                            les rouges d'abord, puis les jaunes, directement sur son pane
        préfixe  A           tableau de tous les Claude : bloqué / à toi / travaille / figé,
                             contexte, effort, avancement 3/7, ce qu'il fait
                             (en direct, Entrée = y aller)

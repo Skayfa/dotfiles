@@ -62,7 +62,7 @@ flowchart TD
 | préfixe `?`                    | tmux popup                           | aide-mémoire `tmux/cheatsheet.txt`                              |
 | préfixe `e`                    | tmux → `zed`                         | ouvre le projet du pane dans **Zed**                            |
 | préfixe `S` / `Tab`            | tmux popup / tmux 3.8                | changer de session / chercher fenêtre ou session                |
-| préfixe `a`                    | tmux → `claude-tmux-wait next`       | aller au prochain **Claude qui t'attend** (toutes sessions)     |
+| préfixe `a`                    | tmux → `claude-tmux-wait next`       | aller au **Claude qui t'attend le plus** : rouges, puis jaunes |
 | préfixe `A`                    | tmux popup → `claude-tmux-wait board`| **tableau de tous les Claude** (état, contexte, effort, avancement), en direct |
 | préfixe `N`                    | tmux popup → `claude-tmux-wait history` | historique des notifications Claude                          |
 | clic / « Autoriser » sur une bannière | Hammerspoon → `claude-tmux-wait goto/approve` | aller à la fenêtre / valider une permission Bash courte |
@@ -171,9 +171,9 @@ flowchart LR
     W["bin/claude-tmux-wait"]
     H --> W
     SL -- "options du pane" --> PANE
-    W -- "@claude_wait (fenêtre)<br/>@claude_state… (pane)" --> PANE["tmux"]
-    PANE --> TAB["● sur l'onglet<br/>« pro ● » dans la barre"]
-    PANE --> NEXT["préfixe a<br/>prochain qui attend"]
+    W -- "@claude_wait 2|1 · @claude_state… (pane)" --> PANE["tmux"]
+    PANE --> TAB["● rouge / jaune sur l'onglet<br/>« pro ● » dans la barre"]
+    PANE --> NEXT["préfixe a<br/>le plus urgent d'abord"]
     PANE --> BOARD["préfixe A<br/>tableau en direct"]
     W -- "history.tsv" --> HIST["préfixe N<br/>historique"]
     W -- "hammerspoon://claude" --> HS["Hammerspoon<br/>bannière macOS"]
@@ -182,7 +182,7 @@ flowchart LR
 ```
 
 - **Avancement** (`PostToolUse` sur `TaskCreate` / `TaskUpdate`) → la liste de tâches de Claude résumée sur le pane : « 3/7 · étape en cours » dans sa barre d'état et dans le tableau. Plus besoin de demander « ça avance ? ».
-- **Fini** (`Stop`) ou **bloqué** (permission, question) → ● sur l'onglet, ligne d'historique, bannière (son seulement quand bloqué, aucune si Alacritty est devant).
+- **Fini** (`Stop`) ou **bloqué** (permission, question) → ● sur l'onglet, tenu par pane (deux Claude d'une fenêtre ne s'effacent plus) : **rouge** pour décision, permission, question, figé après 3 relances ou en boucle ; **jaune** pour à relire ; éteint si le tri dit « info ». Puis ligne d'historique, bannière (son seulement quand bloqué, aucune si Alacritty est devant).
 - **Tu réponds** (`UserPromptSubmit`) ou il reprend (`PostToolUse`) → le ● s'éteint ; **il quitte** (`SessionEnd`) → le pane est oublié.
 - La **commande** d'une permission vient de `PermissionRequest` (la transcription ne l'a pas encore) ; le bouton « Autoriser » ne tape `1` que si le pane montre encore cette demande pour cette commande exacte.
 - **L'IA trie** (Haiku via `claude -p`, isolé : sans outils, sans MCP, depuis `/tmp`, jamais bloquant) :

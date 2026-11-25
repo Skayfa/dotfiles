@@ -42,6 +42,10 @@ pstate() {
     \; set -p -t "$TMUX_PANE" @claude_last "${2:-}" \; set -p -t "$TMUX_PANE" @claude_class ""
 }
 
+# The ● of a pane: dot <pane> 2 (red: decision, permission, question, stuck) | 1 (yellow: to review) | "" (none).
+# Kept on the pane, not the window: two Claudes in one window no longer erase each other's.
+dot() { if [ -n "$2" ]; then tmux set -p -t "$1" @claude_wait "$2"; else tmux set -p -u -t "$1" @claude_wait; fi; }
+
 # The last tool Claude called, from its transcript: "Bash : pnpm test".
 last_tool() {
   tail -n 50 "$1" 2>/dev/null | jq -rs '
@@ -183,6 +187,8 @@ triage() {
   case $class in decision|review|info) ;; *) class=done summary=$text ;; esac
   [ -n "$summary" ] || summary=$text
   tmux set -p -t "$TMUX_PANE" @claude_class "$class" \; set -p -t "$TMUX_PANE" @claude_last "$summary"
+  case $class in decision) dot "$TMUX_PANE" 2 ;; info) dot "$TMUX_PANE" "" ;; esac
+  tmux refresh-client -S
   case $class in
     decision) notify "$win" "$session" "$project" decision "🔴 $project attend ta décision" "$summary" 1 ;;
     review)   notify "$win" "$session" "$project" review "🟡 $project : à relire" "$summary" 0 ;;
@@ -238,6 +244,7 @@ watch() {
             nudge "$pane" >/dev/null 2>&1
             notify "$win" "$session" "$name" stall "↻ $name était figé, relancé" "plus rien depuis $mins min : tour interrompu et repris" 0
           else
+            dot "$pane" 2
             notify "$win" "$session" "$name" stall "⏸ $name reste figé" "relancé 3 fois en 2 h, plus rien depuis $mins min : à toi de voir" 1 "" "$pane" nudge
           fi
         elif [ $((now - mt)) -ge 1800 ]; then
@@ -262,6 +269,7 @@ Erreurs sur les 15 derniers résultats : $errs")
     [ "$(jq -r '.stuck // false' <<<"$r" 2>/dev/null)" = true ] || continue
     why=$(jq -r '.why // ""' <<<"$r" | flatten 120)
     tmux set -p -t "$pane" @claude_loop_for "$since" \; set -p -t "$pane" @claude_loop "$why"
+    dot "$pane" 2
     notify "$win" "$session" "$name" loop "⚠️ $name semble tourner en rond" "$why" 1
   done
 }
@@ -271,14 +279,17 @@ mark_on() {
   payload=${PAYLOAD:-}
   field() { printf '%s' "$payload" | jq -r "$1" 2>/dev/null; }
 
-  tmux set -w -t "$TMUX_PANE" @claude_wait 1
-  tmux refresh-client -S
-  # idle_prompt repeats Stop a minute later: no log, no banner. It also follows an Esc interrupt, which
-  # fires no Stop: a pane still "working" then is in fact waiting for you.
+  # idle_prompt repeats Stop a minute later: no log, no banner, and the ● stays as triage left it. It also
+  # follows an Esc interrupt, which fires no Stop: a pane still "working" then is in fact waiting for you.
   if [ "$kind" = idle ]; then
-    [ "$(tmux display -p -t "$TMUX_PANE" '#{@claude_state}')" = work ] && pstate done "interrompu"
+    if [ "$(tmux display -p -t "$TMUX_PANE" '#{@claude_state}')" = work ]; then
+      pstate done "interrompu"; dot "$TMUX_PANE" 1; tmux refresh-client -S
+    fi
     return
   fi
+  # Until Haiku sorts it, a finished turn is "to review"; a permission or a question needs you now.
+  if [ "$kind" = done ]; then dot "$TMUX_PANE" 1; else dot "$TMUX_PANE" 2; fi
+  tmux refresh-client -S
 
   IFS=$'\t' read -r win session project < <(tmux display -p -t "$TMUX_PANE" '#{window_id}	#{session_name}	#{window_name}')
   cmd=""
@@ -329,7 +340,7 @@ history() {
   if [ "$(wc -l < "$LOG")" -gt 1000 ]; then
     tail -n 500 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
   fi
-  waiting=$(tmux list-windows -a -F '#{?@claude_wait,#{window_id},}' | tr '\n' ' ')
+  waiting=$(tmux list-panes -a -F '#{?@claude_wait,#{window_id},}' | sort -u | tr '\n' ' ')
   today=$(date '+%Y-%m-%d')
   pick=$(tail -r "$LOG" |
     awk -F '\t' -v today="$today" -v waiting=" $waiting " '
@@ -449,7 +460,9 @@ restore() {
 }
 
 goto() {
-  [[ $1 =~ ^@[0-9]+$ ]] || return
+  [[ $1 =~ ^[@%][0-9]+$ ]] || return
+  # A pane: select it in its window, then go to the window.
+  [[ $1 == %* ]] && tmux select-pane -t "$1" 2>/dev/null
   if [ -z "$(tmux display -p -t "$1" '#{window_id}' 2>/dev/null)" ]; then
     tmux display "Cette fenêtre n'existe plus"
     return
@@ -497,13 +510,13 @@ case "${1:-}" in
       text=""
       [ -t 0 ] || text=$(jq -r '.prompt // ""' 2>/dev/null | flatten 120)
       [ -n "$text" ] && text="« $text »"
-      { tmux set -w -u -t "$TMUX_PANE" @claude_wait; pstate work "$text"; tmux refresh-client -S; } >/dev/null 2>&1
+      { dot "$TMUX_PANE" ""; pstate work "$text"; tmux refresh-client -S; } >/dev/null 2>&1
     fi
     exit 0 ;;
   off)
     if [ -n "${TMUX_PANE:-}" ]; then
       {
-        tmux set -w -u -t "$TMUX_PANE" @claude_wait
+        dot "$TMUX_PANE" ""
         [ "$(tmux display -p -t "$TMUX_PANE" '#{@claude_state}')" = blocked ] && pstate work ""
         tmux refresh-client -S
         if [ ! -t 0 ]; then
@@ -515,19 +528,19 @@ case "${1:-}" in
     exit 0 ;;
   end)
     if [ -n "${TMUX_PANE:-}" ]; then
-      { tmux set -w -u -t "$TMUX_PANE" @claude_wait
+      { dot "$TMUX_PANE" ""
         for o in state since last class progress doing stall stall_for nudges ctx effort tx perm_tool perm_cmd perm_text perm_level perm_why perm_for loop loop_for loop_checked; do tmux set -p -u -t "$TMUX_PANE" "@claude_$o"; done
         tmux refresh-client -S; } >/dev/null 2>&1
     fi
     exit 0 ;;
   next)
-    cur=$(tmux display -p '#{window_id}')
-    # Waiting windows in list order, rotated to start after the current one.
-    target=$(tmux list-windows -a -F '#{?@claude_wait,1,0} #{window_id}' |
+    cur=$(tmux display -p '#{pane_id}')
+    # Most urgent first (red, then yellow); within a level, list order rotated to start after the current pane.
+    target=$(tmux list-panes -a -F '#{pane_id} #{@claude_wait}' |
       awk -v cur="$cur" '
-        $2 == cur { seen = 1; next }
-        $1 == 1 { if (seen && !after) after = $2; if (!first) first = $2 }
-        END { print (after ? after : first) }')
+        $1 == cur { seen = 1; next }
+        $2 != "" { if (seen && !after[$2]) after[$2] = $1; if (!first[$2]) first[$2] = $1 }
+        END { for (l = 2; l >= 1; l--) if (after[l] || first[l]) { print (after[l] ? after[l] : first[l]); exit } }')
     if [ -n "$target" ]; then goto "$target"; else tmux display "Aucun Claude ne t'attend"; fi
     ;;
   goto) goto "${2:-}" ;;
