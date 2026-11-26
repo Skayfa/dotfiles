@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Pilotage } from '../types'
-import { FILE, REVIEW_TIMEOUT_MS, STALL_MS, cutErrors, stalled, drift, drop, finish, frozenEdits, go, parse, parseVerdict, serialize, start, statut, statusMoves } from '../hooks/rules.ts'
+import { FILE, REVIEW_TIMEOUT_MS, STALL_MS, cutErrors, endingsOf, stalled, drift, drop, finish, frozenEdits, go, parse, parseVerdict, serialize, start, statut, statusMoves } from '../hooks/rules.ts'
 
 const NOW = Date.parse('2026-11-21T10:00:00Z')
 
@@ -378,6 +378,134 @@ test('a reviewer with no verdict line, no answer, no id, or one that cannot star
   deny = 'unknown agent type'
   expect((await $.tool.call(FINISH)).deny).toContain('could not start (unknown agent type)')
   expect(JSON.parse(files[FILE]).taches[0].statut).toBe('en_cours')
+})
+
+// --- a batch: several tasks, one gate -----------------------------------------------------------
+
+const RAPPEL = 'contracts/schemas/v1/rappel.schema.json'
+// CON-01 (data, its own path) and CON-03 (its own path) both in progress in this session.
+const twoInProgress = (projet: Partial<Pilotage['projet']> = {}, chemins03: string[] = [RAPPEL]): Pilotage => {
+  let p = ok(go(base(), 'M1', NOW)).file
+  p = { ...p, questions: [], taches: p.taches.map(t => (t.id === 'CON-03' ? { ...t, bloque_par: [], chemins: chemins03 } : t)) }
+  p = ok(start(ok(start(p, 'CON-01', NOW, 'sess-1')).file, 'CON-03', NOW, 'sess-1')).file
+  return { ...p, projet: { ...p.projet, ...projet } }
+}
+const END01 = { id: 'CON-01', preuve: 'tests 01 verts', criteres_couverts: [1, 2], relecture_verdict: 'OK', relecture: 'déclaré' }
+const END03 = { id: 'CON-03', preuve: 'tests 03 verts', criteres_couverts: [1] }
+const BATCH = { tool: 'mcp__pilote__tache_terminer', taches: [END01, END03] } as const
+const statuses = (files: Record<string, string>) => JSON.parse(files[FILE]).taches.filter((t: { id: string }) => t.id !== 'CON-02').map((t: { statut: string }) => t.statut)
+
+test('a batch finishes every task with one gate over the union of their paths, its output in each proof', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  const { files } = world(on, { [FILE]: serialize(twoInProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(0, 'make check: ok, 50 s total.\n')) : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call(BATCH)
+  expect(runs.length).toBe(1)
+  expect(runs[0].init?.env?.PILOTE_CHEMINS).toBe(`contracts/schemas/v1/boite.schema.json\n${RAPPEL}`)
+  expect(runs[0].init?.env?.PILOTE_TACHE).toBe('CON-01 CON-03')
+  expect(String(done.result)).toContain('CON-01 terminée')
+  expect(String(done.result)).toContain('CON-03 terminée')
+  const [t1, , t3] = JSON.parse(files[FILE]).taches
+  expect([t1.statut, t3.statut]).toEqual(['fait', 'fait'])
+  expect(t1.preuve).toContain('tests 01 verts')
+  expect(t3.preuve).toContain('tests 03 verts')
+  for (const t of [t1, t3]) expect(t.preuve).toContain('make check: ok, 50 s total.')
+})
+
+test('one refused task in a batch finishes none, and the gate does not run', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  const { files } = world(on, { [FILE]: serialize(twoInProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(0, 'ok\n')) : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call({ ...BATCH, taches: [END01, { ...END03, criteres_couverts: [] }] })
+  expect(done.deny).toContain('CON-03 : Critères non couverts')
+  expect(done.deny).toContain('Aucune tâche terminée')
+  expect(runs.length).toBe(0)
+  expect(statuses(files)).toEqual(['en_cours', 'en_cours'])
+})
+
+test('a task with no paths is refused in a batch: the union would not check it', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  const { files } = world(on, { [FILE]: serialize(twoInProgress({ verification: 'make check' }, [])) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(0, 'ok\n')) : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  expect((await $.tool.call(BATCH)).deny).toContain('CON-03 : pas de chemins')
+  expect(runs.length).toBe(0)
+  expect(statuses(files)).toEqual(['en_cours', 'en_cours'])
+})
+
+test('without a gate, a task with no paths may join a batch: no union to miss it', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const { files } = world(on, { [FILE]: serialize(twoInProgress({}, [])) })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call(BATCH)
+  expect(String(done.result)).toContain('No projet.verification')
+  expect(statuses(files)).toEqual(['fait', 'fait'])
+})
+
+test('a red gate finishes no task of the batch', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  const { files } = world(on, { [FILE]: serialize(twoInProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(2, 'make check: FAILED, 9 s total.\n', 'domaine: 1 test failed')) : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const done = await $.tool.call(BATCH)
+  expect(runs.length).toBe(1)
+  expect(done.deny).toContain('the gate failed')
+  expect(done.deny).toContain('Aucune tâche terminée')
+  expect(statuses(files)).toEqual(['en_cours', 'en_cours'])
+})
+
+test('a review refused for one task of the batch finishes none, after one gate', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  spawner(on, [], () => undefined)
+  const { files } = world(on, { [FILE]: serialize(twoInProgress({ verification: 'make check', relecteur: 'reviewer-agent' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(0, 'ok\n')) : r.argv[0] === 'git' && !r.argv.includes('--git-common-dir') ? out(0, '') : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const call = $.tool.call(BATCH)
+  await clock.settle()
+  await $.turn.complete({ answer: '- BLOQUANT a value is lost\nverdict: BLOQUANT', durationMs: 1, isAborted: false, turnId: 't-1', agentId: 'ag-1', reason: 'answer' })
+  const done = await call
+  expect(runs.length).toBe(1)
+  expect(done.deny).toContain('CON-01 : Refused: review BLOQUANT')
+  expect(done.deny).toContain('Aucune tâche terminée')
+  expect(statuses(files)).toEqual(['en_cours', 'en_cours'])
+})
+
+test('a batch of one behaves as the flat call', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const runs: Run[] = []
+  const { files } = world(on, { [FILE]: serialize(inProgress({ verification: 'make check' })) }, [], {
+    run: r => (r.argv[0] === 'make' ? (runs.push(r), out(0, 'make check: ok, 42 s total.\n')) : undefined),
+  })
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const { tool: _, ...flat } = FINISH
+  const done = await $.tool.call({ tool: FINISH.tool, taches: [flat] })
+  expect(String(done.result)).toContain('CON-01 terminée')
+  expect(String(done.result)).toContain('gate (run by the mod): make check · exit 0')
+  expect(runs[0].init?.env?.PILOTE_TACHE).toBe('CON-01')
+  expect(runs[0].init?.env?.PILOTE_CHEMINS).toBe('contracts/schemas/v1/boite.schema.json')
+  const t = JSON.parse(files[FILE]).taches[0]
+  expect(t.statut).toBe('fait')
+  expect(t.preuve).toContain('make check: ok, 42 s total.')
+})
+
+test('the tool input is one task or a list, never both, never a task twice', () => {
+  expect(endingsOf({ id: 'CON-01', preuve: 'p', criteres_couverts: [1] })).toEqual({ ends: [{ id: 'CON-01', preuve: 'p', covered: [1], review: { verdict: '', texte: '' } }] })
+  expect((endingsOf({}) as { refus: string }).refus).toContain('Donne id')
+  expect((endingsOf({ id: 'CON-01', taches: [END03] }) as { refus: string }).refus).toContain('pas les deux')
+  expect((endingsOf({ taches: [] }) as { refus: string }).refus).toContain('liste non vide')
+  expect((endingsOf({ taches: [END03, END03] }) as { refus: string }).refus).toContain('deux fois : CON-03')
 })
 
 test('the verdict is the last verdict line, made worse by any item marked worse', () => {

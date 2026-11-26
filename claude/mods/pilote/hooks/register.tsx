@@ -5,9 +5,9 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Armed, Pilotage, Snapshot, Tache } from '../types'
 import {
-  FILE, GATE_TIMEOUT_MS, REVIEW_TIMEOUT_MS, ask, coursRows, drop, currentJalon, decide, finish, finishable, frozenEdits, gateArgv,
-  gateLine, gateProof, go, jalonCounts, nextRows, note, parse, parseVerdict, reviewPrompt, scopeCounts, serialize, splitPaths, start,
-  statusMoves, stalled, summary, suspend, tail, toiRows, wakeText, type GateRun, type Move, type Review, type Row,
+  FILE, GATE_TIMEOUT_MS, REVIEW_TIMEOUT_MS, ask, coursRows, drop, currentJalon, decide, endingsOf, finishAll, finishable, frozenEdits, gateArgv,
+  gateLine, gateProof, go, jalonCounts, named, nextRows, noneFinished, note, parse, parseVerdict, reviewPrompt, scopeCounts, serialize, splitPaths, start,
+  statusMoves, stalled, str, summary, suspend, tail, toiRows, wakeText, type GateRun, type Move, type Review, type Row,
 } from './rules.ts'
 
 const PANE = 'pilote'
@@ -25,7 +25,7 @@ const METHOD = [
   `Ce projet est suivi dans \`${FILE}\`, pas dans GitHub. Le code garde les portes, toi tu décides, le propriétaire donne les go.`,
   '- Avant de coder une tâche : `mcp__pilote__tache_demarrer`. Il refuse une tâche qui n’est pas prête (dépendance, question ouverte, jalon sans go, trop de tâches en cours).',
   '- Après chaque étape : `tache_note` (fait / reste / suivant), pour qu’une autre session reprenne sans toi.',
-  '- Pas de CI : la preuve se fait en local (commandes du projet). Pour finir : `tache_terminer` avec la preuve et le numéro de chaque critère couvert. Le mod lance lui-même la gate du projet sur les chemins de la tâche et refuse si elle échoue ; pour une tâche qui touche aux données, il lance lui-même le sous-agent de relecture et refuse sans verdict OK. Pas de preuve, pas de fin.',
+  '- Pas de CI : la preuve se fait en local (commandes du projet). Pour finir : `tache_terminer` avec la preuve et le numéro de chaque critère couvert ; plusieurs tâches finies ensemble passent dans un seul appel (`taches`), pour une seule gate. Le mod lance lui-même la gate du projet sur les chemins des tâches et refuse si elle échoue ; pour une tâche qui touche aux données, il lance lui-même le sous-agent de relecture et refuse sans verdict OK. Pas de preuve, pas de fin.',
   '- Une décision qui revient au propriétaire : `question_poser`. Sa réponse : `question_trancher`, avec ses mots. Ne tranche jamais à sa place.',
   '- Le go d’un jalon appartient au propriétaire (`/go <jalon>` ou le bouton du panneau).',
   '- Plusieurs sessions peuvent travailler en parallèle : chaque tâche déclare ses `chemins`, une tâche tenue par une autre session ne se touche pas, et tu n’écris que dans les chemins de ta tâche. Un chemin de plus : `question_poser` ou édite ses `chemins` avant d’y écrire.',
@@ -43,7 +43,6 @@ let delegated = false
 const woken = new Set<string>()
 let wakeSent = ''
 
-const str = (v: unknown) => (typeof v === 'string' ? v : '')
 const where = () => (root ? `${root}/${FILE}` : FILE)
 const isOurFile = (path: string) => path === where() || ((path === FILE || path === `./${FILE}`) && cwd === root)
 const isCopy = (path: string) => !isOurFile(path) && (path === FILE || path === `./${FILE}` || path.endsWith(`/${FILE}`))
@@ -123,11 +122,13 @@ function answerOf($: EngineInterface, agentId: string, signal: AbortSignal): Pro
   })
 }
 
-// Runs projet.verification in the main checkout, the task's paths in PILOTE_CHEMINS (one per line).
-async function runGate($: EngineInterface, cmd: string, t: Tache): Promise<{ run: GateRun } | { deny: string }> {
+// Runs projet.verification once in the main checkout, for one task or a batch: the union of their paths
+// in PILOTE_CHEMINS (one per line), their ids in PILOTE_TACHE (separated by spaces).
+async function runGate($: EngineInterface, cmd: string, ts: Tache[]): Promise<{ run: GateRun } | { deny: string }> {
   const argv = gateArgv(cmd)
   const at = await $.clock.now()
-  const env = { PILOTE_CHEMINS: (t.chemins ?? []).join('\n'), PILOTE_TACHE: t.id }
+  const ids = ts.map(t => t.id)
+  const env = { PILOTE_CHEMINS: [...new Set(ts.flatMap(t => t.chemins ?? []))].join('\n'), PILOTE_TACHE: ids.join(' ') }
   let res: Awaited<ReturnType<EngineInterface['process']['run']>>
   try {
     res = await $.process.run(argv, { cwd: root || cwd, env, timeoutMs: GATE_TIMEOUT_MS })
@@ -137,7 +138,7 @@ async function runGate($: EngineInterface, cmd: string, t: Tache): Promise<{ run
     const why = /time(d)?[ -]?out/i.test(msg) || ms >= GATE_TIMEOUT_MS - 1_000
       ? `did not finish within ${GATE_TIMEOUT_MS / 60_000} min (${msg})`
       : `could not run (${msg}): is \`${argv[0]}\` installed and on the PATH?`
-    return { deny: `Refused: the gate \`${cmd}\` ${why}. ${t.id} stays in progress.` }
+    return { deny: `Refused: the gate \`${cmd}\` ${why}. ${ids.join(', ')} ${ids.length > 1 ? 'stay' : 'stays'} in progress.` }
   }
   const run: GateRun = { argv, exitCode: res.exitCode, ms: (await $.clock.now()) - at, stdout: res.stdout, stderr: res.stderr, at }
   if (run.exitCode !== 0)
@@ -182,38 +183,52 @@ async function runReview($: EngineInterface, agent: string, t: Tache, signal: Ab
   }
 }
 
-// The cheap refusals first, then the gate, then the reviewer, then the move on a fresh read.
+// The cheap refusals first, for every task, then one gate over all of them, then each task's reviewer,
+// then one move on a fresh read. Any refusal finishes none of them.
 async function terminer($: EngineInterface, e: Record<string, unknown>, signal: AbortSignal): Promise<{ result: string } | { deny: string }> {
-  const id = str(e.id)
-  const preuve = str(e.preuve)
-  const covered = (Array.isArray(e.criteres_couverts) ? e.criteres_couverts : []).map(Number)
+  const input = endingsOf(e)
+  if ('refus' in input) return { deny: input.refus }
+  let ends = input.ends
+  const batch = ends.length > 1
+  const none = (refusals: string[]) => ({ deny: noneFinished(batch, refusals) })
+
   const text = await $.fs.read(where()).catch(() => undefined)
   if (text === undefined) return { deny: `Pas de ${FILE} dans ${root || 'ce dossier'}.` }
   const { data } = parse(text)
   if (!data) return { deny: `${FILE} n’est pas lisible : corrige le JSON d’abord.` }
-  const can = finishable(data, id, preuve, covered, session)
-  if ('refus' in can) return { deny: can.refus }
-  const t = can.task
+  const tasks: Tache[] = []
+  const refused: string[] = []
+  for (const x of ends) {
+    const can = finishable(data, x.id, x.preuve, x.covered, session)
+    if ('refus' in can) refused.push(named(batch, x.id, can.refus))
+    // A batch's gate covers the union of its paths: a task with none would be checked on its neighbours' only.
+    else if (batch && data.projet.verification && !can.task.chemins?.length) refused.push(named(batch, x.id, 'pas de chemins : la gate d’un lot ne la vérifierait pas, termine-la seule.'))
+    else tasks.push(can.task)
+  }
+  if (refused.length) return none(refused)
   const said: string[] = []
 
-  let proof = preuve
   if (data.projet.verification) {
-    const g = await runGate($, data.projet.verification, t)
-    if ('deny' in g) return g
-    proof = gateProof(preuve, g.run)
+    const g = await runGate($, data.projet.verification, tasks)
+    if ('deny' in g) return batch ? none([g.deny]) : g
+    ends = ends.map(x => ({ ...x, preuve: gateProof(x.preuve, g.run) }))
     said.push(gateLine(g.run))
   } else said.push('No projet.verification in the file: the proof is declared, no gate checked it.')
 
-  let review: Review = { verdict: str(e.relecture_verdict), texte: str(e.relecture) }
-  if (t.risque_donnees) {
-    if (data.projet.relecteur) {
-      const r = await runReview($, data.projet.relecteur, t, signal)
-      if ('deny' in r) return r
-      review = r.review
-      said.push(`review: ${review.verdict} (${review.texte})`)
-    } else said.push('No projet.relecteur in the file: the review verdict is declared, no reviewer was run.')
+  const reviews = new Map<string, Review>()
+  for (const t of tasks) {
+    if (!t.risque_donnees) continue
+    if (!data.projet.relecteur) {
+      said.push(named(batch, t.id, 'No projet.relecteur in the file: the review verdict is declared, no reviewer was run.'))
+      continue
+    }
+    const r = await runReview($, data.projet.relecteur, t, signal)
+    if ('deny' in r) return none([named(batch, t.id, r.deny)])
+    reviews.set(t.id, r.review)
+    said.push(named(batch, t.id, `review: ${r.review.verdict} (${r.review.texte})`))
   }
-  const r = await apply($, (p, now) => finish(p, id, proof, covered, now, review, session))
+  const reviewed = ends.map(x => ({ ...x, review: reviews.get(x.id) ?? x.review }))
+  const r = await apply($, (p, now) => finishAll(p, reviewed, now, session))
   return 'deny' in r ? r : { result: `${r.result}\n${said.join('\n')}` }
 }
 
@@ -450,6 +465,10 @@ export const register: Register = on => {
 
 async function registerTools($: EngineInterface): Promise<void> {
   const id = { type: 'string', description: 'Id de la tâche, par exemple CON-01' }
+  const ending = { id, preuve: { type: 'string' }, criteres_couverts: { type: 'array', items: { type: 'number' }, description: 'Numéros des critères couverts, à partir de 1' },
+    relecture_verdict: { type: 'string', enum: ['OK', 'A_CORRIGER', 'BLOQUANT'], description: 'Verdict déclaré de la relecture, lu seulement quand projet.relecteur est absent (sinon le mod lance le relecteur lui-même)' },
+    relecture: { type: 'string', description: 'Ce que la relecture a vérifié, en une ou deux lignes (seulement sans projet.relecteur)' },
+  }
   const tools = [
     {
       name: 'tache_demarrer',
@@ -463,14 +482,13 @@ async function registerTools($: EngineInterface): Promise<void> {
     },
     {
       name: 'tache_terminer',
-      description: 'Termine une tâche en cours. Exige la preuve (commandes lancées en local et leur résultat : il n’y a pas de CI) et le numéro (à partir de 1) de chaque critère d’acceptation couvert : refuse s’il en manque un. Lance ensuite lui-même la gate du projet (projet.verification) sur les chemins de la tâche et refuse si elle échoue ; sa sortie s’ajoute à la preuve. Pour une tâche qui touche aux données, lance lui-même le sous-agent de relecture (projet.relecteur) sur le diff et refuse sans verdict OK. Peut prendre plusieurs minutes. Dit quelles tâches deviennent prêtes.',
+      description: 'Termine une tâche en cours, ou plusieurs d’un coup (taches) : une seule gate pour toutes. Exige pour chacune la preuve (commandes lancées en local et leur résultat : il n’y a pas de CI) et le numéro (à partir de 1) de chaque critère d’acceptation couvert : refuse s’il en manque un. Lance ensuite lui-même la gate du projet (projet.verification), une fois, sur les chemins de toutes les tâches, et refuse si elle échoue ; sa sortie s’ajoute à la preuve de chacune. Pour une tâche qui touche aux données, lance lui-même le sous-agent de relecture (projet.relecteur) sur son diff et refuse sans verdict OK. Un refus, quel qu’il soit, n’en termine aucune. Peut prendre plusieurs minutes. Dit quelles tâches deviennent prêtes.',
       inputSchema: {
         type: 'object',
-        properties: { id, preuve: { type: 'string' }, criteres_couverts: { type: 'array', items: { type: 'number' }, description: 'Numéros des critères couverts, à partir de 1' },
-          relecture_verdict: { type: 'string', enum: ['OK', 'A_CORRIGER', 'BLOQUANT'], description: 'Verdict déclaré de la relecture, lu seulement quand projet.relecteur est absent (sinon le mod lance le relecteur lui-même)' },
-          relecture: { type: 'string', description: 'Ce que la relecture a vérifié, en une ou deux lignes (seulement sans projet.relecteur)' },
+        properties: { ...ending,
+          taches: { type: 'array', items: { type: 'object', properties: ending, required: ['id', 'preuve', 'criteres_couverts'] },
+            description: 'Plusieurs tâches à terminer ensemble, chacune avec ses champs ; à la place de id, preuve, criteres_couverts. Chaque tâche du lot déclare ses chemins.' },
         },
-        required: ['id', 'preuve', 'criteres_couverts'],
       },
     },
     {

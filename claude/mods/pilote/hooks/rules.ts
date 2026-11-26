@@ -328,6 +328,48 @@ export function finish(p: Pilotage, id: string, preuve: string, covered: number[
   return { file: after, said: `${id} terminée.${unlocked(p, after)}` }
 }
 
+// One task to finish, as tache_terminer receives it: flat (one task) or in `taches` (several).
+export type Ending = { id: string; preuve: string; covered: number[]; review: Review }
+
+export const str = (v: unknown) => (typeof v === 'string' ? v : '')
+const endingOf = (e: Record<string, unknown>): Ending => ({
+  id: str(e.id),
+  preuve: str(e.preuve),
+  covered: arr(e.criteres_couverts).map(Number),
+  review: { verdict: str(e.relecture_verdict), texte: str(e.relecture) },
+})
+
+// The tool's input as a list: the flat call is a batch of one.
+export function endingsOf(input: Record<string, unknown>): { ends: Ending[] } | { refus: string } {
+  const batch = input.taches
+  if (batch === undefined) return input.id === undefined ? { refus: 'Donne id (une tâche) ou taches (plusieurs).' } : { ends: [endingOf(input)] }
+  if (input.id !== undefined) return { refus: 'Soit id (une tâche), soit taches (plusieurs), pas les deux.' }
+  if (!Array.isArray(batch) || !batch.length || !batch.every(x => typeof x === 'object' && x !== null))
+    return { refus: 'taches est une liste non vide de { id, preuve, criteres_couverts }.' }
+  const ends = batch.map(x => endingOf(x as Record<string, unknown>))
+  const twice = ends.map(x => x.id).filter((id, i, ids) => ids.indexOf(id) !== i)
+  if (twice.length) return { refus: `Tâche donnée deux fois : ${[...new Set(twice)].join(', ')}.` }
+  return { ends }
+}
+
+// In a batch, a refusal is named by its task, and says that none was finished. Alone, it stays as it is.
+export const named = (batch: boolean, id: string, s: string): string => (batch ? `${id} : ${s}` : s)
+export const noneFinished = (batch: boolean, refusals: string[]): string => (batch ? `${refusals.join('\n')}\nAucune tâche terminée.` : refusals.join('\n'))
+
+// Several tasks finished in one move: all of them, or none (the first refusal).
+export function finishAll(p: Pilotage, ends: Ending[], now: number, holder = ''): Move {
+  const batch = ends.length > 1
+  let file = p
+  const said: string[] = []
+  for (const x of ends) {
+    const m = finish(file, x.id, x.preuve, x.covered, now, x.review, holder)
+    if ('refus' in m) return { refus: noneFinished(batch, [named(batch, x.id, m.refus)]) }
+    file = m.file
+    said.push(m.said)
+  }
+  return { file, said: said.join('\n') }
+}
+
 export function suspend(p: Pilotage, id: string, raison: string, now: number, holder = ''): Move {
   const t = task(p, id)
   if (!t) return { refus: `Tâche inconnue : ${id}.` }
